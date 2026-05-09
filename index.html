@@ -174,7 +174,7 @@
 // DEV FLAGS — Modifier pour tester. Mettre à false pour build final.
 // ============================================================
 const DEV = {
-  godMode: false,        // PV bonus pour tester
+  godMode: true,        // PV bonus pour tester
   startCombat: 0,        // 0 = combat 1, 3 = directement le Briseur
   showHiddenInfo: false, // Affiche des infos cachées à l'écran (utile plus tard)
 };
@@ -251,12 +251,24 @@ function pickRarity() {
 
 function generateRewardChoices(count) {
   const choices = [];
+  const usedIds = new Set();
+  
   for(let i = 0; i < count; i++) {
     const rarity = pickRarity();
-    const candidates = REWARD_POOL.filter(c => c.rarity === rarity);
-    if(candidates.length === 0) continue;
+    
+    // Filtre par rareté ET exclusion des cartes déjà tirées
+    let candidates = REWARD_POOL.filter(c => 
+      c.rarity === rarity && !usedIds.has(c.id)
+    );
+    
+    // Fallback : si la rareté est épuisée, on prend dans tout le pool restant
+    if(candidates.length === 0) {
+      candidates = REWARD_POOL.filter(c => !usedIds.has(c.id));
+      if(candidates.length === 0) break; // pool entièrement épuisé
+    }
+    
     const card = candidates[Math.floor(Math.random() * candidates.length)];
-    // Cloner pour avoir un id unique (au cas où la même carte sort 2 fois)
+    usedIds.add(card.id);
     choices.push({ ...card, id: `${card.id}_${Date.now()}_${i}` });
   }
   return choices;
@@ -378,8 +390,9 @@ function applyElementEffect(el, target) {
     }
     dmg = baseDmg;
     if(target.hp - dmg > 0) {
-      target.brule = (target.brule || 0) + (el.bruleStacks ?? 2);  // ← bruleStacks si défini
-      if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt + 2 Brûlure.`, 'good');
+      const stacks = el.bruleStacks ?? 2;
+      target.brule = (target.brule || 0) + stacks;  // ← bruleStacks si défini
+      if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt + ${stacks} Brûlure.`, 'good');
     } else {
       if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt (létal).`, 'good');
     }
@@ -436,23 +449,32 @@ function assembleAction() {
   G.selected = [];
 
   if(fo.forme === 'arm') {
-    G.shield += fo.shieldAmount ?? 4;  // ← override
-    addLog(`${el.name} + Armure → +4 bouclier (total ${G.shield}).`, 'good');
+    const shieldAmount = fo.shieldAmount ?? 4;
+    G.shield += shieldAmount;
+    addLog(`${el.name} + Armure → +${shieldAmount} bouclier (total ${G.shield}).`, 'good');
   }
-  else if(fo.forme === 'zone') {
-    addLog(`${el.name} + Zone → frappe tous les ennemis :`, 'info');
-    living.forEach(e => applyElementEffect(el, e));
+  else {
+    // Zone ou Projectile : on calcule les cibles, on applique l'effet
+    let targets;
+    if(fo.forme === 'zone') {
+      targets = living;
+      addLog(`${el.name} + Zone → frappe tous les ennemis :`, 'info');
+    } else {
+      // Projectile : 1 seule cible
+      let target;
+      if(living.length === 1) target = living[0];
+      else target = living[G.selectedTarget] || living[0];
+      targets = [target];
+    }
+    
+    targets.forEach(e => applyElementEffect(el, e));
+    
+    // Effet spécial du Vide : pioche (mutualisé)
     if(el.elem === 'vide') {
       const drawCount = el.drawCount ?? 1;
       for(let i = 0; i < drawCount; i++) drawCard();
+      addLog(`Vide → tu pioches ${drawCount} carte(s).`,'info');
     }
-  }
-  else {
-    let target;
-    if(living.length === 1) target = living[0];
-    else target = living[G.selectedTarget] || living[0];
-    applyElementEffect(el, target);
-    if(el.elem === 'vide') drawCard();
   }
 
   G.selectedTarget = null;
@@ -467,7 +489,34 @@ function drawCard() {
     G.combat.discard = [];
   }
   G.combat.hand.push(G.combat.deck.pop());
-  addLog('Vide → tu pioches 1 carte.','info');
+}
+
+function discardCard() {
+  if(G.scene !== 'combat') return;
+  if(G.actionsLeft <= 0) { 
+    addLog('Tu n\'as plus d\'action ce tour.', 'warn'); 
+    render(); return; 
+  }
+  if(G.selected.length !== 1) { 
+    addLog('Sélectionne exactement 1 carte à défausser.', 'warn'); 
+    render(); return; 
+  }
+  
+  const cardId = G.selected[0];
+  const card = G.combat.hand.find(c => c.id === cardId);
+  if(!card) return;
+  
+  // Retirer de la main, mettre dans la défausse
+  G.combat.hand = G.combat.hand.filter(c => c.id !== cardId);
+  G.combat.discard.push(card);
+  G.selected = [];
+  G.actionsLeft--;
+  
+  // Piocher 1 nouvelle carte
+  drawCard();
+  addLog(`Défausse : ${card.name}. Tu pioches une nouvelle carte.`, 'info');
+  
+  render();
 }
 
 function checkWin() {
@@ -565,6 +614,10 @@ function canAssemble() {
   const fo = sel.find(c=>c?.type==='forme');
   if(!el || !fo) return false;
   return (el.cost + fo.cost) <= G.mana && G.actionsLeft > 0;
+}
+
+function canDiscard() {
+  return G.selected.length === 1 && G.actionsLeft > 0;
 }
 
 function assemblyDescription() {
@@ -690,6 +743,7 @@ function renderCombat() {
 
     <div class="actions-row">
       <button class="btn btn-primary" onclick="assembleAction()" ${!canAssemble()?'disabled':''}>Assembler</button>
+      <button class="btn" onclick="discardCard()" ${!canDiscard()?'disabled':''}>Défausser</button>
       <button class="btn" onclick="endTurn()">Fin de tour →</button>
       <button class="btn" onclick="initRun()" style="margin-left:auto;font-size:12px;">Recommencer la run</button>
     </div>
