@@ -247,10 +247,6 @@ function initCombat(index) {
   transitionTo('combat');
 }
 
-function nextCombat() {
-  G.run.combatIndex++;
-  initCombat(G.run.combatIndex);
-}
 
 function onCombatVictory() {
   G.run.playerHp = G.playerHp;
@@ -419,7 +415,7 @@ function endTurn() {
     }
   });
   checkWin();
-  if(G.over) { render(); return; }
+  if(G.scene !== 'combat') return;
 
   // 2. Attaques ennemies
   G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
@@ -461,7 +457,7 @@ function endTurn() {
 // ============================================================
 
 function selectCard(id) {
-  if(G.over) return;
+  if(G.scene !== 'combat') return;
   const idx = G.selected.indexOf(id);
   if(idx >= 0) { G.selected.splice(idx,1); render(); return; }
   const card = G.combat.hand.find(c=>c.id===id);
