@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Proto V2 — Combat avec États</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #e8e8e8;
+      padding: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .game { display: flex; flex-direction: column; gap: 14px; }
+
+    .zone-label {
+      font-size: 11px; font-weight: 500; color: #888;
+      text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;
+    }
+
+    .synergies-banner {
+      background: #2a2a2a; border-radius: 8px; padding: 10px 14px;
+      font-size: 12px; color: #aaa; line-height: 1.7;
+    }
+    .synergies-banner b { color: #fff; font-weight: 500; }
+    .synergies-banner .arrow { color: #9b87d4; }
+
+    .enemies-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    .enemy-card {
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 8px;
+      padding: 10px 14px; min-width: 130px; flex: 1; position: relative;
+    }
+    .enemy-card.dead { opacity: 0.35; }
+    .enemy-name { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+    .enemy-atk { font-size: 12px; color: #aaa; margin-bottom: 6px; }
+    .hp-bar-wrap { background: #1a1a1a; border-radius: 99px; height: 6px; overflow: hidden; }
+    .hp-bar { height: 6px; border-radius: 99px; background: #D85A30; transition: width 0.3s; }
+    .hp-text { font-size: 12px; color: #aaa; margin-top: 3px; }
+    .states-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; min-height: 20px; }
+    .state-badge {
+      font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 500;
+    }
+    .state-givre { background: #1e3a5f; color: #8bb8e8; }
+    .state-brule { background: #5a2a1c; color: #f5a383; }
+    .state-frag  { background: #3d2f5e; color: #b29be0; }
+    .state-stun  { background: #3a3a3a; color: #ccc; }
+
+    .stats-row { display: flex; gap: 10px; }
+    .stat-box {
+      background: #2a2a2a; border-radius: 8px; padding: 8px 14px;
+      flex: 1; text-align: center;
+    }
+    .stat-val { font-size: 20px; font-weight: 500; }
+    .stat-lbl { font-size: 11px; color: #aaa; margin-top: 1px; }
+
+    .hand-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .card {
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 8px;
+      padding: 8px 10px; cursor: pointer; min-width: 95px; flex: 1;
+      transition: border-color 0.15s, transform 0.1s; user-select: none;
+    }
+    .card:hover { border-color: #555; transform: translateY(-2px); }
+    .card.element { border-top: 2px solid #1D9E75; }
+    .card.forme { border-top: 2px solid #7F77DD; }
+    .card.selected.element { border: 2px solid #1D9E75; background: #1f3a30; }
+    .card.selected.forme { border: 2px solid #7F77DD; background: #2c2845; }
+    .card-type { font-size: 10px; font-weight: 500; color: #888; margin-bottom: 2px; }
+    .card-name { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+    .card-cost { font-size: 11px; color: #aaa; }
+    .card-effect { font-size: 11px; color: #aaa; margin-top: 2px; line-height: 1.4; }
+
+    .assembly-zone {
+      background: #2a2a2a; border: 1px dashed #555; border-radius: 8px;
+      padding: 12px; min-height: 64px; display: flex; align-items: center; gap: 10px;
+    }
+    .assembly-preview { font-size: 13px; color: #aaa; flex: 1; line-height: 1.5; }
+    .assembly-bonus { color: #5dd4a3; font-weight: 500; }
+
+    .btn {
+      background: transparent; border: 1px solid #555; border-radius: 8px;
+      padding: 8px 16px; font-size: 13px; font-weight: 500; color: #e8e8e8;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .btn:hover { background: #2a2a2a; }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-primary { background: #1D9E75; color: white; border-color: #1D9E75; }
+    .btn-primary:hover { background: #0F6E56; }
+    .btn-danger { background: #D85A30; color: white; border-color: #D85A30; }
+    .btn-danger:hover { background: #993C1D; }
+
+    .target-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .target-btn {
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 8px;
+      padding: 4px 10px; font-size: 12px; cursor: pointer; color: #e8e8e8;
+    }
+    .target-btn:hover { border-color: #378ADD; }
+    .target-btn.selected { background: #1e3a5f; border: 1px solid #378ADD; color: #8bb8e8; }
+
+    .log {
+      background: #2a2a2a; border-radius: 8px; padding: 10px 14px;
+      max-height: 140px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .log-entry { font-size: 12px; color: #aaa; line-height: 1.5; }
+    .log-entry.good { color: #5dd4a3; font-weight: 500; }
+    .log-entry.bad { color: #f5a383; font-weight: 500; }
+    .log-entry.info { color: #8bb8e8; font-weight: 500; }
+    .log-entry.combo { color: #b29be0; font-weight: 500; }
+    .log-entry.warn { color: #e8c97a; }
+
+    .actions-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .modal-bg {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center; z-index: 20;
+    }
+    .modal {
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 12px;
+      padding: 24px; text-align: center; max-width: 320px;
+    }
+    .modal h2 { font-size: 18px; font-weight: 500; margin-bottom: 8px; }
+    .modal p { font-size: 13px; color: #aaa; margin-bottom: 16px; line-height: 1.5; }
+
+    .divider { border: none; border-top: 1px solid #3a3a3a; }
+  </style>
+</head>
+<body>
+
+<div class="game" id="app"></div>
+
+<script>
+// ============================================================
+// ZONE 1 — DONNÉES STATIQUES
+// Ce qui existe dans le jeu et ne change jamais.
+// ============================================================
+
+
+// ============================================================
+// DEV FLAGS — Modifier pour tester. Mettre à false pour build final.
+// ============================================================
+const DEV = {
+  godMode: false,        // PV bonus pour tester
+  startCombat: 0,        // 0 = combat 1, 3 = directement le Briseur
+  showHiddenInfo: false, // Affiche des infos cachées à l'écran (utile plus tard)
+};
+
+const CARDS_DEF = [
+  { id:'feu1',  type:'element', name:'Feu',        cost:2, effect:'3 dgt + Brûlure (2)',     elem:'feu' },
+  { id:'feu2',  type:'element', name:'Feu',        cost:2, effect:'3 dgt + Brûlure (2)',     elem:'feu' },
+  { id:'gla1',  type:'element', name:'Glace',      cost:2, effect:'1 dgt + Givré (1 tour)',  elem:'glace' },
+  { id:'gla2',  type:'element', name:'Glace',      cost:2, effect:'1 dgt + Givré (1 tour)',  elem:'glace' },
+  { id:'vid1',  type:'element', name:'Vide',       cost:2, effect:'2 dgt + Fragile + pioche',elem:'vide' },
+  { id:'vid2',  type:'element', name:'Vide',       cost:2, effect:'2 dgt + Fragile + pioche',elem:'vide' },
+  { id:'pro1',  type:'forme',   name:'Projectile', cost:1, effect:'1 ennemi ciblé',          forme:'proj' },
+  { id:'pro2',  type:'forme',   name:'Projectile', cost:1, effect:'1 ennemi ciblé',          forme:'proj' },
+  { id:'zon1',  type:'forme',   name:'Zone',       cost:3, effect:'Tous les ennemis',        forme:'zone' },
+  { id:'zon2',  type:'forme',   name:'Zone',       cost:3, effect:'Tous les ennemis',        forme:'zone' },
+  { id:'arm1',  type:'forme',   name:'Armure',     cost:1, effect:'+4 bouclier',             forme:'arm' },
+  { id:'arm2',  type:'forme',   name:'Armure',     cost:1, effect:'+4 bouclier',             forme:'arm' },
+];
+
+const ENCOUNTERS = [
+  { name:'Combat 1 — La Goule',     enemies:[{ name:'Goule',     maxHp:8,  hp:8,  atk:2 }] },
+  { name:'Combat 2 — La Sentinelle',enemies:[{ name:'Sentinelle',maxHp:14, hp:14, atk:4 }] },
+  { name:'Combat 3 — L\'Essaim',    enemies:[
+      { name:'Essaim A', maxHp:4, hp:4, atk:1 },
+      { name:'Essaim B', maxHp:4, hp:4, atk:1 },
+      { name:'Essaim C', maxHp:4, hp:4, atk:1 },
+  ]},
+  {
+  name: 'Combat 4 — Le Briseur',
+  enemies: [
+    { name:'Briseur', maxHp:10, hp:10, atk:5 },
+    { name:'Serviteur', maxHp:4, hp:4, atk:1 },
+    { name:'Serviteur', maxHp:4, hp:4, atk:1 }
+  ]
+}
+];
+
+// ============================================================
+// ZONE 2 — ÉTAT DU JEU
+// L'unique source de vérité. Tout ce qui change vit ici.
+// ============================================================
+
+let G = {};
+
+function shuffle(arr) {
+  const a = [...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+
+function newEnemy(e) {
+  return { ...e, givre:0, brule:0, fragile:0, stun:false };
+}
+
+function initRun() {
+  G = {
+    run: {
+      playerHp: DEV.godMode ? 50 : 20,
+      playerMaxHp: DEV.godMode ? 50 : 20,
+      deck: shuffle([...CARDS_DEF]),
+      combatIndex: 0,
+      combatList: [0, 1, 2, 3],
+    },
+    scene: 'combat',  // ← nouveau
+    log: [],
+  };
+  initCombat(0);
+}
+
+function initCombat(index) {
+  const run = G.run;
+  const encounterId = run.combatList[index];
+  const enc = ENCOUNTERS[encounterId];
+
+  G.encIdx = index;
+  G.encName = enc.name;
+  G.playerHp = run.playerHp;
+  G.playerMaxHp = run.playerMaxHp;
+  G.shield = 0;
+  G.mana = 6;
+  G.maxMana = 6;
+  G.actionsLeft = 2;
+  G.selected = [];
+  G.selectedTarget = null;
+
+  G.combat = {
+    enemies: enc.enemies.map(newEnemy),
+    deck: shuffle([...run.deck]),
+    hand: [],
+    discard: [],
+  };
+
+  drawToFull();
+  addLog(`--- ${enc.name} --- Mana ${G.mana}, Actions ${G.actionsLeft}.`, 'info');
+  transitionTo('combat');
+}
+
+function nextCombat() {
+  G.run.combatIndex++;
+  initCombat(G.run.combatIndex);
+}
+
+function onCombatVictory() {
+  G.run.playerHp = G.playerHp;
+  G.run.deck = [...G.combat.deck, ...G.combat.hand, ...G.combat.discard];
+
+  const isLast = G.run.combatIndex >= G.run.combatList.length - 1;
+  addLog('🏆 Victoire !', 'good');
+  transitionTo(isLast ? 'runwin' : 'reward');
+}
+
+function onCombatDefeat() {
+  transitionTo('gameover');
+}
+
+function onRewardChosen() {
+  G.run.combatIndex++;
+  initCombat(G.run.combatIndex);
+}
+
+function drawToFull() {
+  while(G.combat.hand.length < 4) {
+    if(G.combat.deck.length === 0) {
+      if(G.combat.discard.length === 0) break;
+      G.combat.deck = shuffle([...G.combat.discard]);
+      G.combat.discard = [];
+      addLog('Pioche épuisée — la défausse est mélangée.', 'warn');
+    }
+    G.combat.hand.push(G.combat.deck.pop());
+  }
+}
+
+function addLog(msg, type='') {
+  G.log.unshift({ msg, type });
+  if(G.log.length > 50) G.log.pop();
+}
+
+// ============================================================
+// ZONE 3 — LOGIQUE PURE (ou presque)
+// Les règles du jeu. Mutations contrôlées de G.
+// ============================================================
+
+function applyElementEffect(el, target) {
+  let dmg = 0;
+
+  if(el.elem === 'feu') {
+    let baseDmg = 3;
+    let comboTriggered = false;
+    if(target.givre > 0) {
+      baseDmg *= 2;
+      target.givre = 0;
+      comboTriggered = true;
+      addLog(`🔥❄ CHOC THERMIQUE sur ${target.name} ! Le Feu fait ${baseDmg} dgt (x2) et consume le Givré.`, 'combo');
+    }
+    dmg = baseDmg;
+    if(target.hp - dmg > 0) {
+      target.brule = (target.brule || 0) + 2;
+      if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt + 2 Brûlure.`, 'good');
+    } else {
+      if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt (létal).`, 'good');
+    }
+  }
+  else if(el.elem === 'glace') {
+    dmg = 1;
+    if(target.fragile > 0) {
+      target.stun = true;
+      target.fragile = 0;
+      addLog(`💎❄ FRACTURE sur ${target.name} ! Stun garanti, le Fragile est consumé.`, 'combo');
+    } else {
+      addLog(`Glace → ${target.name} : ${dmg} dgt + Givré.`, 'good');
+    }
+    if(target.hp - dmg > 0) target.givre = 2;
+  }
+  else if(el.elem === 'vide') {
+    let baseDmg = 2;
+    if(target.brule > 0) {
+      const detonation = target.brule;
+      baseDmg += detonation * 2;
+      target.brule = 0;
+      addLog(`💥🔥 DÉTONATION sur ${target.name} ! Vide consume la Brûlure et inflige ${baseDmg} dgt total.`, 'combo');
+    } else {
+      addLog(`Vide → ${target.name} : ${baseDmg} dgt + Fragile + pioche 1.`, 'good');
+    }
+    dmg = baseDmg;
+    if(target.hp - dmg > 0) target.fragile = 1;
+  }
+
+  target.hp = Math.max(0, target.hp - dmg);
+  return dmg;
+}
+
+function assembleAction() {
+  const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
+  const el = sel.find(c=>c.type==='element');
+  const fo = sel.find(c=>c.type==='forme');
+  if(!el || !fo) { addLog('Sélectionne 1 Élément + 1 Forme.','warn'); render(); return; }
+  const totalCost = el.cost + fo.cost;
+  if(totalCost > G.mana) { addLog(`Pas assez de mana (besoin ${totalCost}, dispo ${G.mana}).`,'bad'); render(); return; }
+  if(G.actionsLeft <= 0) { addLog('Tu as déjà assemblé 2 fois ce tour.','warn'); render(); return; }
+
+  const living = G.combat.enemies.filter(e=>e.hp>0);
+  if(living.length === 0) return;
+
+  if(fo.forme === 'proj' && G.selectedTarget === null && living.length > 1) {
+    addLog('Choisis une cible pour le Projectile.','warn'); render(); return;
+  }
+
+  G.mana -= totalCost;
+  G.actionsLeft--;
+  G.combat.hand = G.combat.hand.filter(c=>!G.selected.includes(c.id));
+  G.combat.discard.push(el, fo);
+  G.selected = [];
+
+  if(fo.forme === 'arm') {
+    G.shield += 4;
+    addLog(`${el.name} + Armure → +4 bouclier (total ${G.shield}).`, 'good');
+  }
+  else if(fo.forme === 'zone') {
+    addLog(`${el.name} + Zone → frappe tous les ennemis :`, 'info');
+    living.forEach(e => applyElementEffect(el, e));
+    if(el.elem === 'vide') drawCard();
+  }
+  else {
+    let target;
+    if(living.length === 1) target = living[0];
+    else target = living[G.selectedTarget] || living[0];
+    applyElementEffect(el, target);
+    if(el.elem === 'vide') drawCard();
+  }
+
+  G.selectedTarget = null;
+  checkWin();
+  render();
+}
+
+function drawCard() {
+  if(G.combat.deck.length === 0) {
+    if(G.combat.discard.length === 0) return;
+    G.combat.deck = shuffle([...G.combat.discard]);
+    G.combat.discard = [];
+  }
+  G.combat.hand.push(G.combat.deck.pop());
+  addLog('Vide → tu pioches 1 carte.','info');
+}
+
+function checkWin() {
+  if(G.combat.enemies.every(e=>e.hp<=0)) {
+    onCombatVictory();
+    return;
+  }
+  if (G.playerHp <= 0) {
+    onCombatDefeat();
+    return;
+  }
+}
+
+function endTurn() {
+  G.selected = []; G.selectedTarget = null;
+  addLog('--- Tour ennemi ---', 'info');
+
+  // 1. Tick des Brûlures
+  G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
+    if(e.brule > 0) {
+      e.hp = Math.max(0, e.hp - 1);
+      e.brule -= 1;
+      addLog(`${e.name} subit 1 dgt de Brûlure (${e.brule} restante).`, 'good');
+    }
+  });
+  checkWin();
+  if(G.over) { render(); return; }
+
+  // 2. Attaques ennemies
+  G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
+    if(e.stun) { addLog(`${e.name} est stunné, rate son tour.`,'info'); e.stun = false; return; }
+    let dmg = e.atk;
+    if(G.shield > 0) {
+      const absorbed = Math.min(G.shield, dmg);
+      G.shield -= absorbed; dmg -= absorbed;
+      addLog(`${e.name} attaque : ${absorbed} absorbé par le bouclier.`, 'warn');
+    }
+    if(dmg > 0) {
+      G.playerHp = Math.max(0, G.playerHp - dmg);
+      addLog(`${e.name} inflige ${dmg} dgt. PV joueur : ${G.playerHp}/${G.playerMaxHp}.`, 'bad');
+    }
+  });
+
+  if(G.playerHp <= 0) { 
+    addLog('☠ Tu as été vaincu.', 'bad'); 
+    onCombatDefeat();  // ← appel explicite à la transition
+    return; 
+  }
+  
+  // 3. Décrémentation des durées d'États
+  G.combat.enemies.forEach(e => {
+    if(e.givre > 0) e.givre -= 1;
+    if(e.fragile > 0) e.fragile -= 1;
+  });
+
+  // 4. Reset des stats du joueur
+  G.shield = 0; G.mana = G.maxMana; G.actionsLeft = 2;
+  drawToFull();
+  addLog(`--- Ton tour --- Mana ${G.mana}, Actions ${G.actionsLeft}, Main ${G.combat.hand.length}.`, 'info');
+  render();
+}
+
+// ============================================================
+// ZONE 5 — ÉVÉNEMENTS UTILISATEUR
+// (Volontairement avant le rendu pour que les onclick soient définis)
+// ============================================================
+
+function selectCard(id) {
+  if(G.over) return;
+  const idx = G.selected.indexOf(id);
+  if(idx >= 0) { G.selected.splice(idx,1); render(); return; }
+  const card = G.combat.hand.find(c=>c.id===id);
+  if(!card) return;
+  const alreadyEl = G.selected.some(sid => G.combat.hand.find(c=>c.id===sid)?.type==='element');
+  const alreadyFo = G.selected.some(sid => G.combat.hand.find(c=>c.id===sid)?.type==='forme');
+  if(card.type==='element' && alreadyEl) { addLog('Tu as déjà sélectionné un Élément.','warn'); render(); return; }
+  if(card.type==='forme' && alreadyFo) { addLog('Tu as déjà sélectionné une Forme.','warn'); render(); return; }
+  G.selected.push(id);
+  render();
+}
+
+function selectTarget(idx) {
+  G.selectedTarget = idx;
+  render();
+}
+
+// ============================================================
+// ZONE 4 — RENDU
+// L'écran est toujours une fonction de G.
+// ============================================================
+
+function canAssemble() {
+  const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
+  const el = sel.find(c=>c?.type==='element');
+  const fo = sel.find(c=>c?.type==='forme');
+  if(!el || !fo) return false;
+  return (el.cost + fo.cost) <= G.mana && G.actionsLeft > 0;
+}
+
+function assemblyDescription() {
+  const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
+  const el = sel.find(c=>c?.type==='element');
+  const fo = sel.find(c=>c?.type==='forme');
+  if(!el && !fo) return 'Sélectionne 1 Élément + 1 Forme dans ta main.';
+  if(el && !fo) return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
+  if(!el && fo) return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
+
+  const cost = el.cost + fo.cost;
+  let bonus = '';
+
+  if(fo.forme !== 'arm') {
+    const living = G.combat.enemies.filter(e=>e.hp>0);
+    const targets = fo.forme === 'zone' ? living :
+                    (living.length === 1 ? living :
+                     G.selectedTarget !== null ? [living[G.selectedTarget]] : []);
+    targets.forEach(t => {
+      if(!t) return;
+      if(el.elem === 'feu' && t.givre > 0) bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${t.name} (x2)</span> `;
+      if(el.elem === 'vide' && t.brule > 0) bonus += `<span class="assembly-bonus">⚡ Détonation sur ${t.name} (+${t.brule*2} dgt)</span> `;
+      if(el.elem === 'glace' && t.fragile > 0) bonus += `<span class="assembly-bonus">⚡ Fracture sur ${t.name} (stun garanti)</span> `;
+    });
+  }
+
+  let baseDesc = '';
+  if(fo.forme === 'arm') baseDesc = `${el.name} + Armure → +4 bouclier`;
+  else if(fo.forme === 'zone') baseDesc = `${el.name} + Zone → frappe tous`;
+  else baseDesc = `${el.name} + Projectile → 1 cible`;
+  return `${baseDesc}. Coût : ${cost} mana. ${bonus}`;
+}
+
+function needsTargetChoice() {
+  const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
+  const fo = sel.find(c=>c?.type==='forme');
+  if(!fo || fo.forme !== 'proj') return false;
+  return G.combat.enemies.filter(e=>e.hp>0).length > 1;
+}
+
+function renderCombat() {
+  const app = document.getElementById('app');
+
+  let enemyHTML = G.combat.enemies.map((e, i) => {
+    const pct = Math.round((e.hp / e.maxHp) * 100);
+    let states = '';
+    if(e.givre > 0)   states += `<span class="state-badge state-givre">❄ Givré ${e.givre}</span>`;
+    if(e.brule > 0)   states += `<span class="state-badge state-brule">🔥 Brûlure ${e.brule}</span>`;
+    if(e.fragile > 0) states += `<span class="state-badge state-frag">💎 Fragile ${e.fragile}</span>`;
+    if(e.stun)        states += `<span class="state-badge state-stun">Stunné</span>`;
+    return `<div class="enemy-card ${e.hp<=0?'dead':''}">
+      <div class="enemy-name">${e.name}</div>
+      <div class="enemy-atk">Attaque : ${e.atk} dgt/tour</div>
+      <div class="hp-bar-wrap"><div class="hp-bar" style="width:${pct}%"></div></div>
+      <div class="hp-text">${e.hp} / ${e.maxHp} PV</div>
+      <div class="states-row">${states}</div>
+    </div>`;
+  }).join('');
+
+
+  let handHTML = G.combat.hand.map(c => {
+    const sel = G.selected.includes(c.id);
+    return `<div class="card ${c.type} ${sel?'selected':''}" onclick="selectCard('${c.id}')">
+      <div class="card-type">${c.type==='element'?'Élément':'Forme'}</div>
+      <div class="card-name">${c.name}</div>
+      <div class="card-cost">${c.cost} mana</div>
+      <div class="card-effect">${c.effect}</div>
+    </div>`;
+  }).join('');
+
+  if(G.combat.hand.length === 0) handHTML = `<div style="font-size:13px;color:#888;padding:8px;">Main vide — fin de tour ?</div>`;
+
+  let targetHTML = '';
+  if(needsTargetChoice()) {
+    const living = G.combat.enemies.map((e,i)=>({e,i})).filter(o=>o.e.hp>0);
+    targetHTML = `<div class="target-row">
+      <div style="font-size:12px;color:#aaa;align-self:center">Cible :</div>
+      ${living.map(o=>`<button class="target-btn ${G.selectedTarget===o.i?'selected':''}" onclick="selectTarget(${o.i})">${o.e.name}</button>`).join('')}
+    </div>`;
+  }
+
+  const logHTML = G.log.slice(0,18).map(l=>`<div class="log-entry ${l.type}">${l.msg}</div>`).join('');
+
+  app.innerHTML = `
+    <div class="synergies-banner">
+      <b>Synergies :</b>
+      Glace → Givré <span class="arrow">→</span> Feu fait x2 dgt (Choc thermique).
+      Feu → Brûlure <span class="arrow">→</span> Vide détonne (+2 dgt par stack).
+      Vide → Fragile <span class="arrow">→</span> Glace stunne automatiquement (Fracture).
+    </div>
+
+    <div>
+      <div class="zone-label">${G.encName}</div>
+      <div class="enemies-row">${enemyHTML}</div>
+    </div>
+
+    <hr class="divider">
+
+    <div>
+      <div class="zone-label">Ton état</div>
+      <div class="stats-row">
+        <div class="stat-box"><div class="stat-val">${G.playerHp}<span style="font-size:13px;color:#666">/${G.playerMaxHp}</span></div><div class="stat-lbl">PV</div></div>
+        <div class="stat-box"><div class="stat-val">${G.shield}</div><div class="stat-lbl">Bouclier</div></div>
+        <div class="stat-box"><div class="stat-val">${G.mana}<span style="font-size:13px;color:#666">/${G.maxMana}</span></div><div class="stat-lbl">Mana</div></div>
+        <div class="stat-box"><div class="stat-val">${G.actionsLeft}</div><div class="stat-lbl">Actions</div></div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div>
+      <div class="zone-label">Ta main (${G.combat.hand.length} cartes — pioche ${G.combat.deck.length}, défausse ${G.combat.discard.length})</div>
+      <div class="hand-row">${handHTML}</div>
+    </div>
+
+    <div>
+      <div class="zone-label">Zone d'assemblage</div>
+      <div class="assembly-zone">
+        <div class="assembly-preview">${assemblyDescription()}</div>
+      </div>
+      ${targetHTML}
+    </div>
+
+    <div class="actions-row">
+      <button class="btn btn-primary" onclick="assembleAction()" ${!canAssemble()?'disabled':''}>Assembler</button>
+      <button class="btn" onclick="endTurn()">Fin de tour →</button>
+      <button class="btn" onclick="initRun()" style="margin-left:auto;font-size:12px;">Recommencer la run</button>
+    </div>
+
+    <hr class="divider">
+
+    <div>
+      <div class="zone-label">Journal de combat</div>
+      <div class="log">${logHTML}</div>
+    </div>
+  `;
+}
+
+function renderReward() {
+  document.getElementById('app').innerHTML = `
+    <div class="modal-bg"><div class="modal">
+      <h2 style="color:#e8c97a">Récompense</h2>
+      <p style="color:#888">Étape 3 à venir.</p>
+      <button class="btn btn-primary" onclick="onRewardChosen()">Combat suivant →</button>
+    </div></div>
+  `;
+}
+
+function renderRunWin() {
+  document.getElementById('app').innerHTML = `
+    <div class="modal-bg"><div class="modal">
+      <h2 style="color:#5dd4a3">Run terminée !</h2>
+      <p>Tu as survécu à tous les combats.<br>Bien joué.</p>
+      <button class="btn btn-primary" onclick="initRun()">Nouvelle run</button>
+    </div></div>
+  `;
+}
+
+function renderGameOver() {
+  document.getElementById('app').innerHTML = `
+    <div class="modal-bg"><div class="modal">
+      <h2 style="color:#f5a383">Défaite</h2>
+      <p>Tu es tombé à 0 PV.<br>La run est terminée.</p>
+      <button class="btn btn-danger" onclick="initRun()">Recommencer la run</button>
+    </div></div>
+  `;
+}
+
+function transitionTo(scene) {
+  G.scene = scene;
+  render();
+}
+
+function render() {
+  switch(G.scene) {
+    case 'combat':   renderCombat();   break;
+    case 'reward':   renderReward();   break;
+    case 'gameover': renderGameOver(); break;
+    case 'runwin':   renderRunWin();   break;
+  }
+}
+
+// ============================================================
+// DÉMARRAGE
+// ============================================================
+
+initRun();
+if(DEV.startCombat > 0) {
+  G.run.combatIndex = DEV.startCombat;
+  initCombat(DEV.startCombat);
+}
+</script>
+
+</body>
+</html>
