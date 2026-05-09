@@ -129,6 +129,34 @@
     .modal p { font-size: 13px; color: #aaa; margin-bottom: 16px; line-height: 1.5; }
 
     .divider { border: none; border-top: 1px solid #3a3a3a; }
+
+    .reward-card {
+      background: #252525;
+      border: 2px solid #555;
+      border-radius: 12px;
+      padding: 16px;
+      width: 180px;
+      cursor: pointer;
+      text-align: left;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .reward-card:hover {
+      transform: translateY(-4px);
+      border-color: #888;
+    }
+    .reward-card.rarity-common { border-color: #888; }
+    .reward-card.rarity-rare   { border-color: #378ADD; box-shadow: 0 0 12px rgba(55,138,221,0.3); }
+    .reward-card.rarity-epic   { border-color: #b29be0; box-shadow: 0 0 16px rgba(178,155,224,0.4); }
+    .rarity-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+    .rarity-common .rarity-label { color: #888; }
+    .rarity-rare   .rarity-label { color: #378ADD; }
+    .rarity-epic   .rarity-label { color: #b29be0; }
   </style>
 </head>
 <body>
@@ -166,6 +194,20 @@ const CARDS_DEF = [
   { id:'arm2',  type:'forme',   name:'Armure',     cost:1, effect:'+4 bouclier',             forme:'arm' },
 ];
 
+const REWARD_POOL = [
+  // Communes (alpha — variantes basiques)
+  { id:'feuP_1', type:'element', name:'Feu+', cost:2, effect:'4 dgt + Brûlure (2)', elem:'feu', rarity:'common', dmgOverride:4 },
+  { id:'projP_1', type:'forme', name:'Projectile+', cost:0, effect:'1 ennemi ciblé (gratuit)', forme:'proj', rarity:'common' },
+  
+  // Rares (bêta — variantes mécaniques)
+  { id:'glaceLong_1', type:'element', name:'Glace persistante', cost:2, effect:'1 dgt + Givré (3 tours)', elem:'glace', rarity:'rare', givreDuration:3 },
+  { id:'feuIntense_1', type:'element', name:'Brûlure intense', cost:2, effect:'3 dgt + Brûlure (4)', elem:'feu', rarity:'rare', bruleStacks:4 },
+  
+  // Épiques (bêta+ — fortes ou signature)
+  { id:'videInstable_1', type:'element', name:'Vide instable', cost:1, effect:'2 dgt + Fragile + pioche 2', elem:'vide', rarity:'epic', drawCount:2 },
+  { id:'armureRunique_1', type:'forme', name:'Armure runique', cost:1, effect:'+6 bouclier', forme:'arm', rarity:'epic', shieldAmount:6 },
+];
+
 const ENCOUNTERS = [
   { name:'Combat 1 — La Goule',     enemies:[{ name:'Goule',     maxHp:8,  hp:8,  atk:2 }] },
   { name:'Combat 2 — La Sentinelle',enemies:[{ name:'Sentinelle',maxHp:14, hp:14, atk:4 }] },
@@ -184,12 +226,41 @@ const ENCOUNTERS = [
 }
 ];
 
+const RARITY_WEIGHTS = [
+  ['common',  60],
+  ['rare',    30],
+  ['epic',    10],
+];
+
 // ============================================================
 // ZONE 2 — ÉTAT DU JEU
 // L'unique source de vérité. Tout ce qui change vit ici.
 // ============================================================
 
 let G = {};
+
+function pickRarity() {
+  const total = RARITY_WEIGHTS.reduce((s, [_, w]) => s + w, 0);
+  let roll = Math.random() * total;
+  for(const [rarity, weight] of RARITY_WEIGHTS) {
+    roll -= weight;
+    if(roll < 0) return rarity;
+  }
+  return 'common';
+}
+
+function generateRewardChoices(count) {
+  const choices = [];
+  for(let i = 0; i < count; i++) {
+    const rarity = pickRarity();
+    const candidates = REWARD_POOL.filter(c => c.rarity === rarity);
+    if(candidates.length === 0) continue;
+    const card = candidates[Math.floor(Math.random() * candidates.length)];
+    // Cloner pour avoir un id unique (au cas où la même carte sort 2 fois)
+    choices.push({ ...card, id: `${card.id}_${Date.now()}_${i}` });
+  }
+  return choices;
+}
 
 function shuffle(arr) {
   const a = [...arr];
@@ -254,7 +325,12 @@ function onCombatVictory() {
 
   const isLast = G.run.combatIndex >= G.run.combatList.length - 1;
   addLog('🏆 Victoire !', 'good');
-  transitionTo(isLast ? 'runwin' : 'reward');
+  if(isLast) {
+    transitionTo('runwin');
+  } else {
+    G.rewardChoices = generateRewardChoices(3);  // ← nouveau
+    transitionTo('reward');
+  }
 }
 
 function onCombatDefeat() {
@@ -292,7 +368,7 @@ function applyElementEffect(el, target) {
   let dmg = 0;
 
   if(el.elem === 'feu') {
-    let baseDmg = 3;
+    let baseDmg = el.dmgOverride ?? 3;  // ← utilise dmgOverride si défini, sinon 3
     let comboTriggered = false;
     if(target.givre > 0) {
       baseDmg *= 2;
@@ -302,7 +378,7 @@ function applyElementEffect(el, target) {
     }
     dmg = baseDmg;
     if(target.hp - dmg > 0) {
-      target.brule = (target.brule || 0) + 2;
+      target.brule = (target.brule || 0) + (el.bruleStacks ?? 2);  // ← bruleStacks si défini
       if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt + 2 Brûlure.`, 'good');
     } else {
       if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt (létal).`, 'good');
@@ -317,7 +393,7 @@ function applyElementEffect(el, target) {
     } else {
       addLog(`Glace → ${target.name} : ${dmg} dgt + Givré.`, 'good');
     }
-    if(target.hp - dmg > 0) target.givre = 2;
+    if(target.hp - dmg > 0) target.givre = el.givreDuration ?? 2;
   }
   else if(el.elem === 'vide') {
     let baseDmg = 2;
@@ -360,13 +436,16 @@ function assembleAction() {
   G.selected = [];
 
   if(fo.forme === 'arm') {
-    G.shield += 4;
+    G.shield += fo.shieldAmount ?? 4;  // ← override
     addLog(`${el.name} + Armure → +4 bouclier (total ${G.shield}).`, 'good');
   }
   else if(fo.forme === 'zone') {
     addLog(`${el.name} + Zone → frappe tous les ennemis :`, 'info');
     living.forEach(e => applyElementEffect(el, e));
-    if(el.elem === 'vide') drawCard();
+    if(el.elem === 'vide') {
+      const drawCount = el.drawCount ?? 1;
+      for(let i = 0; i < drawCount; i++) drawCard();
+    }
   }
   else {
     let target;
@@ -625,13 +704,38 @@ function renderCombat() {
 }
 
 function renderReward() {
+  const cardsHTML = G.rewardChoices.map((c, i) => {
+    const rarityClass = `rarity-${c.rarity}`;
+    return `<div class="reward-card ${rarityClass}" onclick="pickReward(${i})">
+      <div class="rarity-label">${c.rarity}</div>
+      <div class="card-name">${c.name}</div>
+      <div class="card-cost">${c.cost} mana</div>
+      <div class="card-effect">${c.effect}</div>
+    </div>`;
+  }).join('');
+  
   document.getElementById('app').innerHTML = `
-    <div class="modal-bg"><div class="modal">
-      <h2 style="color:#e8c97a">Récompense</h2>
-      <p style="color:#888">Étape 3 à venir.</p>
-      <button class="btn btn-primary" onclick="onRewardChosen()">Combat suivant →</button>
-    </div></div>
+    <div style="padding: 40px 20px; text-align: center;">
+      <h2 style="margin-bottom: 24px;">Choisis une carte récompense</h2>
+      <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 24px;">
+        ${cardsHTML}
+      </div>
+      <button class="btn" onclick="skipReward()">Passer (ne rien prendre)</button>
+    </div>
   `;
+}
+
+function pickReward(index) {
+  const card = G.rewardChoices[index];
+  G.run.deck.push(card);
+  addLog(`Carte ajoutée : ${card.name} (${card.rarity}).`, 'good');
+  G.rewardChoices = null;  // nettoyage
+  onRewardChosen();
+}
+
+function skipReward() {
+  G.rewardChoices = null;
+  onRewardChosen();
 }
 
 function renderRunWin() {
