@@ -219,9 +219,9 @@ const ENCOUNTERS = [
   {
   name: 'Combat 4 — Le Briseur',
   enemies: [
-    { name:'Briseur', maxHp:10, hp:10, atk:5 },
-    { name:'Serviteur', maxHp:4, hp:4, atk:1 },
-    { name:'Serviteur', maxHp:4, hp:4, atk:1 }
+    { name:'Briseur', maxHp:10, hp:10, atk:4 },
+    { name:'Serviteur', maxHp:3, hp:3, atk:1 },
+    { name:'Serviteur', maxHp:3, hp:3, atk:1 }
   ]
 }
 ];
@@ -306,6 +306,17 @@ function initCombat(index) {
   const run = G.run;
   const encounterId = run.combatList[index];
   const enc = ENCOUNTERS[encounterId];
+
+  // Régénération entre combats (sauf le premier)
+  if(index > 0) {
+    const HEAL_BETWEEN_COMBATS = 4;
+    const healed = Math.min(run.playerMaxHp, run.playerHp + HEAL_BETWEEN_COMBATS);
+    const actualHeal = healed - run.playerHp;
+    run.playerHp = healed;
+    if(actualHeal > 0) {
+      addLog(`Tu te soignes de ${actualHeal} PV avant le combat. (${run.playerHp}/${run.playerMaxHp})`, 'good');
+    }
+  }
 
   G.encIdx = index;
   G.encName = enc.name;
