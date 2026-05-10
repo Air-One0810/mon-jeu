@@ -157,6 +157,9 @@
     .rarity-common .rarity-label { color: #888; }
     .rarity-rare   .rarity-label { color: #378ADD; }
     .rarity-epic   .rarity-label { color: #b29be0; }
+
+    .card.consumable { border-top: 2px solid #d4a23d; }
+    .card.selected.consumable { border: 2px solid #d4a23d; background: #3d2f1c; }
   </style>
 </head>
 <body>
@@ -174,7 +177,7 @@
 // DEV FLAGS — Modifier pour tester. Mettre à false pour build final.
 // ============================================================
 const DEV = {
-  godMode: true,        // PV bonus pour tester
+  godMode: false,        // PV bonus pour tester
   startCombat: 0,        // 0 = combat 1, 3 = directement le Briseur
   showHiddenInfo: false, // Affiche des infos cachées à l'écran (utile plus tard)
 };
@@ -206,6 +209,12 @@ const REWARD_POOL = [
   // Épiques (bêta+ — fortes ou signature)
   { id:'videInstable_1', type:'element', name:'Vide instable', cost:1, effect:'2 dgt + Fragile + pioche 2', elem:'vide', rarity:'epic', drawCount:2 },
   { id:'armureRunique_1', type:'forme', name:'Armure runique', cost:1, effect:'+6 bouclier', forme:'arm', rarity:'epic', shieldAmount:6 },
+
+  // Consumables (catégorie spéciale)
+  { id:'regen_1', type:'consumable', name:'Régénération', cost:0, effect:'Soigne 5 PV', rarity:'rare', heal:5 },
+
+  // Effet de récompense spécial (pas une carte)
+  { id:'sceauVital_1', type:'reward_effect', name:'Sceau vital', cost:null, effect:'+5 PV max et soigne 5 PV (effet immédiat)', rarity:'epic', instantEffect:'maxHpUp', maxHpUp:5 },
 ];
 
 const ENCOUNTERS = [
@@ -590,6 +599,39 @@ function endTurn() {
   render();
 }
 
+function playConsumable() {
+  if(G.scene !== 'combat') return;
+  if(G.actionsLeft <= 0) { addLog('Tu n\'as plus d\'action ce tour.', 'warn'); render(); return; }
+  if(G.selected.length !== 1) return;
+  
+  const cardId = G.selected[0];
+  const card = G.combat.hand.find(c => c.id === cardId);
+  if(!card || card.type !== 'consumable') return;
+  
+  if(card.cost > G.mana) {
+    addLog(`Pas assez de mana (besoin ${card.cost}, dispo ${G.mana}).`, 'bad');
+    render(); return;
+  }
+  
+  // Retirer de la main, mettre à la défausse
+  G.combat.hand = G.combat.hand.filter(c => c.id !== cardId);
+  G.combat.discard.push(card);
+  G.mana -= card.cost;
+  G.actionsLeft--;
+  G.selected = [];
+  
+  // Appliquer l'effet
+  if(card.heal) {
+    const before = G.playerHp;
+    G.playerHp = Math.min(G.playerMaxHp, G.playerHp + card.heal);
+    const actualHeal = G.playerHp - before;
+    addLog(`${card.name} → tu soignes ${actualHeal} PV. (${G.playerHp}/${G.playerMaxHp})`, 'good');
+  }
+  // Plus tard : autres effets de consumables ici (manaBoost, drawExtra, etc.)
+  
+  render();
+}
+
 // ============================================================
 // ZONE 5 — ÉVÉNEMENTS UTILISATEUR
 // (Volontairement avant le rendu pour que les onclick soient définis)
@@ -601,6 +643,23 @@ function selectCard(id) {
   if(idx >= 0) { G.selected.splice(idx,1); render(); return; }
   const card = G.combat.hand.find(c=>c.id===id);
   if(!card) return;
+  
+  // Cas spécial : consumable → sélection exclusive
+  if(card.type === 'consumable') {
+    G.selected = [id];
+    render();
+    return;
+  }
+  
+  // Si un consumable est déjà sélectionné, on le désélectionne avant
+  const consumableSelected = G.selected.some(sid => 
+    G.combat.hand.find(c=>c.id===sid)?.type === 'consumable'
+  );
+  if(consumableSelected) {
+    G.selected = [];
+  }
+  
+  // Logique existante pour Element/Forme
   const alreadyEl = G.selected.some(sid => G.combat.hand.find(c=>c.id===sid)?.type==='element');
   const alreadyFo = G.selected.some(sid => G.combat.hand.find(c=>c.id===sid)?.type==='forme');
   if(card.type==='element' && alreadyEl) { addLog('Tu as déjà sélectionné un Élément.','warn'); render(); return; }
@@ -619,6 +678,23 @@ function selectTarget(idx) {
 // L'écran est toujours une fonction de G.
 // ============================================================
 
+function selectionType() {
+  if(G.selected.length === 0) return 'none';
+  const cards = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
+  if(cards.some(c => c?.type === 'consumable')) return 'consumable';
+  return 'assembly';
+}
+
+function canPlay() {
+  const t = selectionType();
+  if(t === 'consumable') {
+    const card = G.combat.hand.find(c => c.id === G.selected[0]);
+    return card && card.cost <= G.mana && G.actionsLeft > 0;
+  }
+  if(t === 'assembly') return canAssemble();
+  return false;
+}
+
 function canAssemble() {
   const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
   const el = sel.find(c=>c?.type==='element');
@@ -632,6 +708,12 @@ function canDiscard() {
 }
 
 function assemblyDescription() {
+  const t = selectionType();
+  
+  if(t === 'consumable') {
+    const card = G.combat.hand.find(c => c.id === G.selected[0]);
+    return `→ ${card.name} : ${card.effect}. Coût : ${card.cost} mana.`;
+  }
   const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
   const el = sel.find(c=>c?.type==='element');
   const fo = sel.find(c=>c?.type==='forme');
@@ -691,8 +773,11 @@ function renderCombat() {
 
   let handHTML = G.combat.hand.map(c => {
     const sel = G.selected.includes(c.id);
+    const typeLabel = c.type === 'element' ? 'Élément' : 
+                      c.type === 'forme' ? 'Forme' : 
+                      'Consumable';
     return `<div class="card ${c.type} ${sel?'selected':''}" onclick="selectCard('${c.id}')">
-      <div class="card-type">${c.type==='element'?'Élément':'Forme'}</div>
+      <div class="card-type">${typeLabel}</div>
       <div class="card-name">${c.name}</div>
       <div class="card-cost">${c.cost} mana</div>
       <div class="card-effect">${c.effect}</div>
@@ -711,6 +796,10 @@ function renderCombat() {
   }
 
   const logHTML = G.log.slice(0,18).map(l=>`<div class="log-entry ${l.type}">${l.msg}</div>`).join('');
+  
+  const t = selectionType();
+  const buttonLabel = t === 'consumable' ? 'Jouer la carte' : 'Assembler';
+  const buttonAction = t === 'consumable' ? 'playConsumable()' : 'assembleAction()';
 
   app.innerHTML = `
     <div class="synergies-banner">
@@ -753,7 +842,7 @@ function renderCombat() {
     </div>
 
     <div class="actions-row">
-      <button class="btn btn-primary" onclick="assembleAction()" ${!canAssemble()?'disabled':''}>Assembler</button>
+      <button class="btn btn-primary" onclick="${buttonAction}" ${!canPlay()?'disabled':''}>${buttonLabel}</button>
       <button class="btn" onclick="discardCard()" ${!canDiscard()?'disabled':''}>Défausser</button>
       <button class="btn" onclick="endTurn()">Fin de tour →</button>
       <button class="btn" onclick="initRun()" style="margin-left:auto;font-size:12px;">Recommencer la run</button>
@@ -771,10 +860,11 @@ function renderCombat() {
 function renderReward() {
   const cardsHTML = G.rewardChoices.map((c, i) => {
     const rarityClass = `rarity-${c.rarity}`;
+    const costDisplay = c.cost === null ? 'Effet permanent' : `${c.cost} mana`;
     return `<div class="reward-card ${rarityClass}" onclick="pickReward(${i})">
       <div class="rarity-label">${c.rarity}</div>
       <div class="card-name">${c.name}</div>
-      <div class="card-cost">${c.cost} mana</div>
+      <div class="card-cost">${costDisplay}</div>
       <div class="card-effect">${c.effect}</div>
     </div>`;
   }).join('');
@@ -792,9 +882,22 @@ function renderReward() {
 
 function pickReward(index) {
   const card = G.rewardChoices[index];
-  G.run.deck.push(card);
-  addLog(`Carte ajoutée : ${card.name} (${card.rarity}).`, 'good');
-  G.rewardChoices = null;  // nettoyage
+  
+  // Cas spécial : effet de récompense (pas une carte)
+  if(card.type === 'reward_effect') {
+    if(card.instantEffect === 'maxHpUp') {
+      G.run.playerMaxHp += card.maxHpUp;
+      G.run.playerHp = Math.min(G.run.playerMaxHp, G.run.playerHp + card.maxHpUp);
+      addLog(`${card.name} → +${card.maxHpUp} PV max, soigné. (${G.run.playerHp}/${G.run.playerMaxHp})`, 'good');
+    }
+    // Plus tard : autres types d'effets ici
+  } else {
+    // Cas normal : carte qui rejoint le deck
+    G.run.deck.push(card);
+    addLog(`Carte ajoutée : ${card.name} (${card.rarity}).`, 'good');
+  }
+  
+  G.rewardChoices = null;
   onRewardChosen();
 }
 
