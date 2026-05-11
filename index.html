@@ -177,7 +177,7 @@
 // DEV FLAGS — Modifier pour tester. Mettre à false pour build final.
 // ============================================================
 const DEV = {
-  godMode: false,        // PV bonus pour tester
+  godMode: true,        // PV bonus pour tester
   startCombat: 0,        // 0 = combat 1, 3 = directement le Briseur
   showHiddenInfo: false, // Affiche des infos cachées à l'écran (utile plus tard)
 };
@@ -253,6 +253,21 @@ const REWARD_POOL = [
 
   // Effet de récompense spécial (pas une carte)
   { id:'sceauVital_1', type:'reward_effect', name:'Sceau vital', cost:null, effect:'+5 PV max et soigne 5 PV (effet immédiat)', rarity:'epic', instantEffect:'maxHpUp', maxHpUp:5 },
+
+  // Cartes verrouillées (à débloquer via méta-progression)
+  { 
+    id:'glaceMortelle_1', type:'element', name:'Glace mortelle', 
+    cost:3, effect:'2 dgt + Givré (2 tours) + Fragile', 
+    elem:'glace', rarity:'rare', 
+    givreDuration:2, applyFragile:true,
+    locked:true, unlockCost:5
+  },
+  { 
+    id:'maelstrom_1', type:'element', name:'Maelström', 
+    cost:3, effect:'3 dgt + Brûlure (2) + Givré (1) + Fragile', 
+    elem:'maelstrom', rarity:'epic', 
+    locked:true, unlockCost:12
+  },
 ];
 
 const ENCOUNTERS = [
@@ -300,18 +315,21 @@ function generateRewardChoices(count) {
   const choices = [];
   const usedIds = new Set();
   
+  // Filtrer le pool : on exclut les cartes verrouillées non débloquées
+  const availablePool = REWARD_POOL.filter(c => 
+    !c.locked || G.meta.unlockedCards.includes(c.id)
+  );
+  
   for(let i = 0; i < count; i++) {
     const rarity = pickRarity();
     
-    // Filtre par rareté ET exclusion des cartes déjà tirées
-    let candidates = REWARD_POOL.filter(c => 
+    let candidates = availablePool.filter(c => 
       c.rarity === rarity && !usedIds.has(c.id)
     );
     
-    // Fallback : si la rareté est épuisée, on prend dans tout le pool restant
     if(candidates.length === 0) {
-      candidates = REWARD_POOL.filter(c => !usedIds.has(c.id));
-      if(candidates.length === 0) break; // pool entièrement épuisé
+      candidates = availablePool.filter(c => !usedIds.has(c.id));
+      if(candidates.length === 0) break;
     }
     
     const card = candidates[Math.floor(Math.random() * candidates.length)];
@@ -413,12 +431,6 @@ function onCombatVictory() {
   }
 }
 
-function commitRunRewards(won) {
-  G.meta.fragments += G.run.fragmentsEarned;
-  if(won) G.meta.totalRunsWon++;
-  else G.meta.totalRunsLost++;
-  saveMeta();
-}
 
 function onCombatDefeat() {
   commitRunRewards(false);  // run perdue, mais on garde les Fragments accumulés
@@ -452,6 +464,39 @@ function addLog(msg, type='') {
 // Les règles du jeu. Mutations contrôlées de G.
 // ============================================================
 
+function commitRunRewards(won) {
+  G.meta.fragments += G.run.fragmentsEarned;
+  if(won) G.meta.totalRunsWon++;
+  else G.meta.totalRunsLost++;
+  saveMeta();
+}
+
+function unlockCard(cardId) {
+  const card = REWARD_POOL.find(c => c.id === cardId);
+  if(!card) {
+    console.error(`Carte introuvable : ${cardId}`);
+    return false;
+  }
+  if(!card.locked) {
+    console.warn(`Carte déjà déverrouillée : ${cardId}`);
+    return false;
+  }
+  if(G.meta.unlockedCards.includes(cardId)) {
+    console.warn(`Carte déjà débloquée : ${cardId}`);
+    return false;
+  }
+  if(G.meta.fragments < card.unlockCost) {
+    console.warn(`Pas assez de Fragments : ${G.meta.fragments}/${card.unlockCost}`);
+    return false;
+  }
+  
+  G.meta.fragments -= card.unlockCost;
+  G.meta.unlockedCards.push(cardId);
+  saveMeta();
+  return true;
+}
+
+
 function applyElementEffect(el, target) {
   let dmg = 0;
 
@@ -482,7 +527,14 @@ function applyElementEffect(el, target) {
     } else {
       addLog(`Glace → ${target.name} : ${dmg} dgt + Givré.`, 'good');
     }
-    if(target.hp - dmg > 0) target.givre = el.givreDuration ?? 2;
+    if(target.hp - dmg > 0) {
+      target.givre = el.givreDuration ?? 2;
+      // NOUVEAU : certaines variantes de Glace appliquent aussi Fragile
+      if(el.applyFragile) {
+        target.fragile = 1;
+        addLog(`${target.name} devient aussi Fragile.`, 'good');
+      }
+    }
   }
   else if(el.elem === 'vide') {
     let baseDmg = 2;
@@ -496,6 +548,16 @@ function applyElementEffect(el, target) {
     }
     dmg = baseDmg;
     if(target.hp - dmg > 0) target.fragile = 1;
+  }
+  else if(el.elem === 'maelstrom') {
+    // Maelström : un élément multi-États sans interaction de combo
+    dmg = 3;
+    if(target.hp - dmg > 0) {
+      target.brule = (target.brule || 0) + 2;
+      target.givre = 1;
+      target.fragile = 1;
+    }
+    addLog(`🌀 MAELSTRÖM sur ${target.name} : ${dmg} dgt + tous les États appliqués.`, 'combo');
   }
 
   target.hp = Math.max(0, target.hp - dmg);
@@ -1007,8 +1069,11 @@ function render() {
 // Charger la méta au démarrage (avant tout le reste)
 G.meta = loadMeta();
 
-// Pour reset la méta depuis la console : tape resetMeta() puis location.reload()
-window.resetMeta = resetMeta;  // expose la fonction globalement pour debug
+
+window.resetMeta = resetMeta; // Pour reset la méta depuis la console : tape resetMeta() puis location.reload()
+window.unlockCard = unlockCard;  // pour tester depuis la console
+window.giveFragments = (n) => { G.meta.fragments += n; saveMeta(); console.log(`+${n} Fragments. Total : ${G.meta.fragments}`); };
+window.showMeta = () => console.log(JSON.parse(JSON.stringify(G.meta)));
 
 initRun();
 if(DEV.startCombat > 0) {
