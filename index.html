@@ -418,14 +418,13 @@ function onCombatVictory() {
 
   const isLast = G.run.combatIndex >= G.run.combatList.length - 1;
   
-  // Récompense en Fragments
   const fragmentsThisCombat = isLast ? 3 : 1;
   G.run.fragmentsEarned += fragmentsThisCombat;
   addLog(`🏆 Victoire ! +${fragmentsThisCombat} Fragment(s) (total run : ${G.run.fragmentsEarned}).`, 'good');
   
   if(isLast) {
-    commitRunRewards(true);  // run gagnée
-    transitionTo('runwin');
+    commitRunRewards(true);
+    transitionTo('meta');  // ← changé de 'runwin' à 'meta'
   } else {
     G.rewardChoices = generateRewardChoices(3);
     transitionTo('reward');
@@ -434,13 +433,25 @@ function onCombatVictory() {
 
 
 function onCombatDefeat() {
-  commitRunRewards(false);  // run perdue, mais on garde les Fragments accumulés
-  transitionTo('gameover');
+  commitRunRewards(false);
+  transitionTo('meta');  // ← changé de 'gameover' à 'meta'
 }
 
 function onRewardChosen() {
   G.run.combatIndex++;
   initCombat(G.run.combatIndex);
+}
+
+function onUnlockCard(cardId) {
+  const success = unlockCard(cardId);
+  if(success) {
+    render();  // re-rendu pour voir le résultat
+  }
+}
+
+function onStartRun() {
+  G.lastRunResult = null;  // on efface le récap de la run précédente
+  initRun();
 }
 
 function drawToFull() {
@@ -470,6 +481,12 @@ function commitRunRewards(won) {
   if(won) G.meta.totalRunsWon++;
   else G.meta.totalRunsLost++;
   saveMeta();
+  
+  // Mémoriser le résultat pour affichage sur l'écran méta
+  G.lastRunResult = {
+    won: won,
+    fragmentsEarned: G.run.fragmentsEarned
+  };
 }
 
 function unlockCard(cardId) {
@@ -791,6 +808,12 @@ function selectTarget(idx) {
   render();
 }
 
+function abandonRun() {
+  if(!confirm('Abandonner cette run ? Tes Fragments accumulés seront conservés.')) return;
+  commitRunRewards(false);
+  transitionTo('meta');
+}
+
 // ============================================================
 // ZONE 4 — RENDU
 // L'écran est toujours une fonction de G.
@@ -867,6 +890,101 @@ function needsTargetChoice() {
   const fo = sel.find(c=>c?.type==='forme');
   if(!fo || fo.forme !== 'proj') return false;
   return G.combat.enemies.filter(e=>e.hp>0).length > 1;
+}
+
+function renderMeta() {
+  const meta = G.meta;
+  const lastRun = G.lastRunResult;
+  
+  // 1. En-tête avec récap optionnel
+  let headerHTML = `<h1 style="font-size:24px;font-weight:500;margin-bottom:8px;">Méta-progression</h1>`;
+  
+  if(lastRun) {
+    const title = lastRun.won ? 'Run terminée — victoire' : 'Run terminée — défaite';
+    const titleColor = lastRun.won ? '#5dd4a3' : '#f5a383';
+    headerHTML += `
+      <div style="background:#2a2a2a;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+        <div style="color:${titleColor};font-weight:500;margin-bottom:4px;">${title}</div>
+        <div style="font-size:13px;color:#aaa;">+${lastRun.fragmentsEarned} Fragments gagnés cette run.</div>
+      </div>
+    `;
+  }
+  
+  // 2. Stats méta
+  const statsHTML = `
+    <div class="stats-row" style="margin-bottom:24px;">
+      <div class="stat-box"><div class="stat-val" style="color:#e8c97a;">${meta.fragments}</div><div class="stat-lbl">Fragments</div></div>
+      <div class="stat-box"><div class="stat-val">${meta.totalRunsWon}</div><div class="stat-lbl">Runs gagnées</div></div>
+      <div class="stat-box"><div class="stat-val">${meta.totalRunsLost}</div><div class="stat-lbl">Runs perdues</div></div>
+      <div class="stat-box"><div class="stat-val">${meta.unlockedCards.length}</div><div class="stat-lbl">Cartes débloquées</div></div>
+    </div>
+  `;
+  
+  // 3. Liste des cartes verrouillées (avec bouton de débloquage)
+  const lockedCards = REWARD_POOL.filter(c => c.locked && !meta.unlockedCards.includes(c.id));
+  const lockedHTML = lockedCards.length > 0 ? `
+    <div style="margin-bottom:24px;">
+      <div class="zone-label">Cartes à débloquer</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        ${lockedCards.map(c => {
+          const canAfford = meta.fragments >= c.unlockCost;
+          const rarityClass = `rarity-${c.rarity}`;
+          return `
+            <div class="reward-card ${rarityClass}" style="opacity:0.7;cursor:default;">
+              <div class="rarity-label">${c.rarity}</div>
+              <div class="card-name">🔒 ${c.name}</div>
+              <div class="card-effect">${c.effect}</div>
+              <button class="btn ${canAfford?'btn-primary':''}" 
+                      onclick="onUnlockCard('${c.id}')" 
+                      ${!canAfford?'disabled':''}
+                      style="margin-top:12px;width:100%;font-size:12px;">
+                Débloquer — ${c.unlockCost} Fragments
+              </button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  ` : '';
+  
+  // 4. Liste des cartes débloquées
+  const unlockedCards = REWARD_POOL.filter(c => c.locked && meta.unlockedCards.includes(c.id));
+  const unlockedHTML = unlockedCards.length > 0 ? `
+    <div style="margin-bottom:24px;">
+      <div class="zone-label">Cartes débloquées</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        ${unlockedCards.map(c => {
+          const rarityClass = `rarity-${c.rarity}`;
+          return `
+            <div class="reward-card ${rarityClass}" style="cursor:default;">
+              <div class="rarity-label">${c.rarity}</div>
+              <div class="card-name">✓ ${c.name}</div>
+              <div class="card-effect">${c.effect}</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  ` : '';
+  
+  // 5. Bouton de lancement de run
+  const launchHTML = `
+    <div style="margin-top:32px;">
+      <button class="btn btn-primary" onclick="onStartRun()" style="font-size:16px;padding:14px 24px;width:100%;">
+        Lancer une nouvelle run →
+      </button>
+    </div>
+  `;
+  
+  document.getElementById('app').innerHTML = `
+    <div style="padding:20px 0;">
+      ${headerHTML}
+      ${statsHTML}
+      ${lockedHTML}
+      ${unlockedHTML}
+      ${launchHTML}
+    </div>
+  `;
 }
 
 function renderCombat() {
@@ -963,7 +1081,7 @@ function renderCombat() {
       <button class="btn btn-primary" onclick="${buttonAction}" ${!canPlay()?'disabled':''}>${buttonLabel}</button>
       <button class="btn" onclick="discardCard()" ${!canDiscard()?'disabled':''}>Défausser</button>
       <button class="btn" onclick="endTurn()">Fin de tour →</button>
-      <button class="btn" onclick="initRun()" style="margin-left:auto;font-size:12px;">Recommencer la run</button>
+      <button class="btn" onclick="abandonRun()" style="margin-left:auto;font-size:12px;">Abandonner la run</button>
     </div>
 
     <hr class="divider">
@@ -1024,29 +1142,6 @@ function skipReward() {
   onRewardChosen();
 }
 
-function renderRunWin() {
-  document.getElementById('app').innerHTML = `
-    <div class="modal-bg"><div class="modal">
-      <h2 style="color:#5dd4a3">Run terminée !</h2>
-      <p>Tu as survécu à tous les combats.<br>
-         <strong style="color:#e8c97a">+${G.run.fragmentsEarned} Fragments gagnés cette run</strong><br>
-         Total accumulé : <strong>${G.meta.fragments} Fragments</strong></p>
-      <button class="btn btn-primary" onclick="initRun()">Nouvelle run</button>
-    </div></div>
-  `;
-}
-
-function renderGameOver() {
-  document.getElementById('app').innerHTML = `
-    <div class="modal-bg"><div class="modal">
-      <h2 style="color:#f5a383">Défaite</h2>
-      <p>Tu es tombé à 0 PV.<br>
-         <strong style="color:#e8c97a">+${G.run.fragmentsEarned} Fragments conservés</strong><br>
-         Total accumulé : <strong>${G.meta.fragments} Fragments</strong></p>
-      <button class="btn btn-danger" onclick="initRun()">Recommencer la run</button>
-    </div></div>
-  `;
-}
 
 function transitionTo(scene) {
   G.scene = scene;
@@ -1059,6 +1154,7 @@ function render() {
     case 'reward':   renderReward();   break;
     case 'gameover': renderGameOver(); break;
     case 'runwin':   renderRunWin();   break;
+    case 'meta':     renderMeta();     break;  // ← NOUVEAU
   }
 }
 
@@ -1066,19 +1162,24 @@ function render() {
 // DÉMARRAGE
 // ============================================================
 
-// Charger la méta au démarrage (avant tout le reste)
+// Charger la méta au démarrage
 G.meta = loadMeta();
 
-
-window.resetMeta = resetMeta; // Pour reset la méta depuis la console : tape resetMeta() puis location.reload()
-window.unlockCard = unlockCard;  // pour tester depuis la console
+// Pour reset depuis la console
+window.resetMeta = resetMeta;
+window.unlockCard = unlockCard;
 window.giveFragments = (n) => { G.meta.fragments += n; saveMeta(); console.log(`+${n} Fragments. Total : ${G.meta.fragments}`); };
 window.showMeta = () => console.log(JSON.parse(JSON.stringify(G.meta)));
 
-initRun();
+// Démarrer sur l'écran méta (sauf si DEV.startCombat est activé)
 if(DEV.startCombat > 0) {
+  initRun();
   G.run.combatIndex = DEV.startCombat;
   initCombat(DEV.startCombat);
+} else {
+  G.scene = 'meta';
+  G.lastRunResult = null;  // pas de run terminée à afficher au tout premier démarrage
+  render();
 }
 </script>
 
