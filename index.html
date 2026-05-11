@@ -182,6 +182,44 @@ const DEV = {
   showHiddenInfo: false, // Affiche des infos cachées à l'écran (utile plus tard)
 };
 
+// ============================================================
+// MÉTA-PROGRESSION (persiste entre les runs et les sessions)
+// ============================================================
+const META_STORAGE_KEY = 'mon-jeu:meta:v1';
+
+const DEFAULT_META = {
+  fragments: 0,
+  unlockedCards: [],  // ids de cartes débloquées (pour 4.2)
+  totalRunsWon: 0,
+  totalRunsLost: 0,
+};
+
+function loadMeta() {
+  try {
+    const stored = localStorage.getItem(META_STORAGE_KEY);
+    if (!stored) return { ...DEFAULT_META };
+    const parsed = JSON.parse(stored);
+    // Merge avec DEFAULT_META pour gérer les nouvelles propriétés
+    return { ...DEFAULT_META, ...parsed };
+  } catch (e) {
+    console.warn('Erreur de chargement méta, reset.', e);
+    return { ...DEFAULT_META };
+  }
+}
+
+function saveMeta() {
+  try {
+    localStorage.setItem(META_STORAGE_KEY, JSON.stringify(G.meta));
+  } catch (e) {
+    console.error('Erreur de sauvegarde méta.', e);
+  }
+}
+
+function resetMeta() {
+  localStorage.removeItem(META_STORAGE_KEY);
+  G.meta = { ...DEFAULT_META };
+}
+
 const CARDS_DEF = [
   { id:'feu1',  type:'element', name:'Feu',        cost:2, effect:'3 dgt + Brûlure (2)',     elem:'feu' },
   { id:'feu2',  type:'element', name:'Feu',        cost:2, effect:'3 dgt + Brûlure (2)',     elem:'feu' },
@@ -297,13 +335,17 @@ function newEnemy(e) {
 }
 
 function initRun() {
+  // Préserver la méta-progression à travers les runs
+  const meta = G.meta || loadMeta();
   G = {
+    meta,
     run: {
       playerHp: DEV.godMode ? 50 : 20,
       playerMaxHp: DEV.godMode ? 50 : 20,
       deck: shuffle([...CARDS_DEF]),
       combatIndex: 0,
       combatList: [0, 1, 2, 3],
+      fragmentsEarned: 0,  // ← NOUVEAU : Fragments gagnés pendant CETTE run
     },
     scene: 'combat',  // ← nouveau
     log: [],
@@ -356,16 +398,30 @@ function onCombatVictory() {
   G.run.deck = [...G.combat.deck, ...G.combat.hand, ...G.combat.discard];
 
   const isLast = G.run.combatIndex >= G.run.combatList.length - 1;
-  addLog('🏆 Victoire !', 'good');
+  
+  // Récompense en Fragments
+  const fragmentsThisCombat = isLast ? 3 : 1;
+  G.run.fragmentsEarned += fragmentsThisCombat;
+  addLog(`🏆 Victoire ! +${fragmentsThisCombat} Fragment(s) (total run : ${G.run.fragmentsEarned}).`, 'good');
+  
   if(isLast) {
+    commitRunRewards(true);  // run gagnée
     transitionTo('runwin');
   } else {
-    G.rewardChoices = generateRewardChoices(3);  // ← nouveau
+    G.rewardChoices = generateRewardChoices(3);
     transitionTo('reward');
   }
 }
 
+function commitRunRewards(won) {
+  G.meta.fragments += G.run.fragmentsEarned;
+  if(won) G.meta.totalRunsWon++;
+  else G.meta.totalRunsLost++;
+  saveMeta();
+}
+
 function onCombatDefeat() {
+  commitRunRewards(false);  // run perdue, mais on garde les Fragments accumulés
   transitionTo('gameover');
 }
 
@@ -910,7 +966,9 @@ function renderRunWin() {
   document.getElementById('app').innerHTML = `
     <div class="modal-bg"><div class="modal">
       <h2 style="color:#5dd4a3">Run terminée !</h2>
-      <p>Tu as survécu à tous les combats.<br>Bien joué.</p>
+      <p>Tu as survécu à tous les combats.<br>
+         <strong style="color:#e8c97a">+${G.run.fragmentsEarned} Fragments gagnés cette run</strong><br>
+         Total accumulé : <strong>${G.meta.fragments} Fragments</strong></p>
       <button class="btn btn-primary" onclick="initRun()">Nouvelle run</button>
     </div></div>
   `;
@@ -920,7 +978,9 @@ function renderGameOver() {
   document.getElementById('app').innerHTML = `
     <div class="modal-bg"><div class="modal">
       <h2 style="color:#f5a383">Défaite</h2>
-      <p>Tu es tombé à 0 PV.<br>La run est terminée.</p>
+      <p>Tu es tombé à 0 PV.<br>
+         <strong style="color:#e8c97a">+${G.run.fragmentsEarned} Fragments conservés</strong><br>
+         Total accumulé : <strong>${G.meta.fragments} Fragments</strong></p>
       <button class="btn btn-danger" onclick="initRun()">Recommencer la run</button>
     </div></div>
   `;
@@ -943,6 +1003,12 @@ function render() {
 // ============================================================
 // DÉMARRAGE
 // ============================================================
+
+// Charger la méta au démarrage (avant tout le reste)
+G.meta = loadMeta();
+
+// Pour reset la méta depuis la console : tape resetMeta() puis location.reload()
+window.resetMeta = resetMeta;  // expose la fonction globalement pour debug
 
 initRun();
 if(DEV.startCombat > 0) {
