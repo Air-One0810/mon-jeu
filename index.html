@@ -257,15 +257,16 @@ const REWARD_POOL = [
   // Cartes verrouillées (à débloquer via méta-progression)
   { 
     id:'glaceMortelle_1', type:'element', name:'Glace mortelle', 
-    cost:3, effect:'2 dgt + Givré (2 tours) + Fragile', 
+    cost:3, effect:'2 dgt + Givré (2 tours) + Fragile (2 tours)', 
     elem:'glace', rarity:'rare', 
-    givreDuration:2, applyFragile:true,
+    givreDuration:2, applyFragile:true, fragileDuration:2,  // ← NOUVEAU
     locked:true, unlockCost:5
   },
   { 
     id:'maelstrom_1', type:'element', name:'Maelström', 
-    cost:3, effect:'3 dgt + Brûlure (2) + Givré (1) + Fragile', 
+    cost:3, effect:'3 dgt + Brûlure (3) + Givré (2) + Fragile (2)', 
     elem:'maelstrom', rarity:'epic', 
+    bruleStacks:3, givreDuration:2, fragileDuration:2,  // ← NOUVEAU
     locked:true, unlockCost:12
   },
 ];
@@ -529,10 +530,9 @@ function applyElementEffect(el, target) {
     }
     if(target.hp - dmg > 0) {
       target.givre = el.givreDuration ?? 2;
-      // NOUVEAU : certaines variantes de Glace appliquent aussi Fragile
       if(el.applyFragile) {
-        target.fragile = 1;
-        addLog(`${target.name} devient aussi Fragile.`, 'good');
+        target.fragile = el.fragileDuration ?? 1;  // ← NOUVEAU : durée custom
+        addLog(`${target.name} devient aussi Fragile (${target.fragile} tour(s)).`, 'good');
       }
     }
   }
@@ -547,17 +547,17 @@ function applyElementEffect(el, target) {
       addLog(`Vide → ${target.name} : ${baseDmg} dgt + Fragile + pioche 1.`, 'good');
     }
     dmg = baseDmg;
-    if(target.hp - dmg > 0) target.fragile = 1;
+    if(target.hp - dmg > 0) target.fragile = el.fragileDuration ?? 1;  // ← lecture override
   }
   else if(el.elem === 'maelstrom') {
-    // Maelström : un élément multi-États sans interaction de combo
     dmg = 3;
     if(target.hp - dmg > 0) {
-      target.brule = (target.brule || 0) + 2;
-      target.givre = 1;
-      target.fragile = 1;
+      const bStacks = el.bruleStacks ?? 2;
+      target.brule = (target.brule || 0) + bStacks;
+      target.givre = el.givreDuration ?? 1;
+      target.fragile = el.fragileDuration ?? 1;
     }
-    addLog(`🌀 MAELSTRÖM sur ${target.name} : ${dmg} dgt + tous les États appliqués.`, 'combo');
+    addLog(`🌀 MAELSTRÖM sur ${target.name} : ${dmg} dgt + Brûlure/Givré/Fragile appliqués.`, 'combo');
   }
 
   target.hp = Math.max(0, target.hp - dmg);
