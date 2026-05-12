@@ -177,7 +177,7 @@
 // DEV FLAGS — Modifier pour tester. Mettre à false pour build final.
 // ============================================================
 const DEV = {
-  godMode: true,        // PV bonus pour tester
+  godMode: false,        // PV bonus pour tester
   startCombat: 0,        // 0 = combat 1, 3 = directement le Briseur
   showHiddenInfo: false, // Affiche des infos cachées à l'écran (utile plus tard)
 };
@@ -272,21 +272,64 @@ const REWARD_POOL = [
 ];
 
 const ENCOUNTERS = [
-  { name:'Combat 1 — La Goule',     enemies:[{ name:'Goule',     maxHp:8,  hp:8,  atk:2 }] },
-  { name:'Combat 2 — La Sentinelle',enemies:[{ name:'Sentinelle',maxHp:14, hp:14, atk:4 }] },
-  { name:'Combat 3 — L\'Essaim',    enemies:[
+  // ============ COMBATS 1-3 : ANCIENS (tutoriel implicite) ============
+  { 
+    name:'Combat 1 — La Goule',     
+    enemies:[{ name:'Goule', maxHp:8, hp:8, atk:2 }] 
+  },
+  { 
+    name:'Combat 2 — La Sentinelle',
+    enemies:[{ name:'Sentinelle', maxHp:14, hp:14, atk:4 }] 
+  },
+  { 
+    name:'Combat 3 — L\'Essaim',    
+    enemies:[
       { name:'Essaim A', maxHp:4, hp:4, atk:1 },
       { name:'Essaim B', maxHp:4, hp:4, atk:1 },
       { name:'Essaim C', maxHp:4, hp:4, atk:1 },
-  ]},
+    ]
+  },
+  
+  // ============ COMBAT 4 : LE TANK ============
   {
-  name: 'Combat 4 — Le Briseur',
-  enemies: [
-    { name:'Briseur', maxHp:10, hp:10, atk:4 },
-    { name:'Serviteur', maxHp:3, hp:3, atk:1 },
-    { name:'Serviteur', maxHp:3, hp:3, atk:1 }
-  ]
-}
+    name:'Combat 4 — Le Bastion',
+    enemies:[{ 
+      name:'Bastion', maxHp:14, hp:14, atk:3,
+      archetype:'tank',
+      startShield:6,
+      shieldRegen:2,
+    }]
+  },
+  
+  // ============ COMBAT 5 : LE CATALYSEUR ============
+  {
+    name:'Combat 5 — Le Réacteur',
+    enemies:[{ 
+      name:'Réacteur', maxHp:10, hp:10, atk:2,
+      archetype:'catalyst',
+    }]
+  },
+  
+  // ============ COMBAT 6 : LE CHARGÉ ============
+  {
+    name:'Combat 6 — Le Berserker',
+    enemies:[{ 
+      name:'Berserker', maxHp:14, hp:14, atk:2,
+      archetype:'charged',
+      chargedDamage:7,
+      chargedInterval:2,  // attaque chargée tous les 2 tours
+    }]
+  },
+  
+  // ============ COMBAT 7 : LE BOSS ============
+  {
+    name:'Combat 7 — Le Briseur',
+    enemies:[
+      { name:'Briseur', maxHp:10, hp:10, atk:4 },
+      { name:'Serviteur A', maxHp:3, hp:3, atk:1 },
+      { name:'Serviteur B', maxHp:3, hp:3, atk:1 }
+    ]
+  }
 ];
 
 const RARITY_WEIGHTS = [
@@ -350,7 +393,20 @@ function shuffle(arr) {
 }
 
 function newEnemy(e) {
-  return { ...e, givre:0, brule:0, fragile:0, stun:false };
+  return {
+    ...e,
+    givre:0, brule:0, fragile:0, stun:false,
+    
+    // Tank : bouclier ennemi
+    enemyShield: e.startShield ?? 0,
+    
+    // Chargé : intention d'attaque préparée
+    intent: null,  // { type: 'charged', damage: N } quand chargé
+    
+    // Catalyseur : tracking des États déjà appliqués (pour la réaction)
+    appliedStates: new Set(),  // contient 'givre', 'brule', 'fragile' selon ce qui a été posé
+    atkBonus: 0,  // bonus permanent accumulé via la réaction du Catalyseur
+  };
 }
 
 function initRun() {
@@ -363,7 +419,7 @@ function initRun() {
       playerMaxHp: DEV.godMode ? 50 : 20,
       deck: shuffle([...CARDS_DEF]),
       combatIndex: 0,
-      combatList: [0, 1, 2, 3],
+      combatList: [0, 1, 2, 3, 4, 5, 6],
       fragmentsEarned: 0,  // ← NOUVEAU : Fragments gagnés pendant CETTE run
     },
     scene: 'combat',  // ← nouveau
@@ -514,6 +570,24 @@ function unlockCard(cardId) {
   return true;
 }
 
+function applyStateToEnemy(target, stateName, value) {
+  // Si la cible avait déjà cet État, on update la valeur (pas une nouvelle application)
+  const isNew = !target.appliedStates.has(stateName);
+  
+  if(stateName === 'givre') target.givre = value;
+  else if(stateName === 'brule') target.brule = (target.brule || 0) + value;
+  else if(stateName === 'fragile') target.fragile = value;
+  
+  // Réaction du Catalyseur : seulement si c'est une nouvelle application
+  if(isNew && target.archetype === 'catalyst') {
+    target.atkBonus = (target.atkBonus || 0) + 1;
+    addLog(`⚡ Le ${target.name} absorbe l'État et gagne +1 attaque (total : ${target.atk + target.atkBonus}).`, 'warn');
+    target.appliedStates.add(stateName);
+  } else if(isNew) {
+    target.appliedStates.add(stateName);
+  }
+}
+
 
 function applyElementEffect(el, target) {
   let dmg = 0;
@@ -530,7 +604,7 @@ function applyElementEffect(el, target) {
     dmg = baseDmg;
     if(target.hp - dmg > 0) {
       const stacks = el.bruleStacks ?? 2;
-      target.brule = (target.brule || 0) + stacks;  // ← bruleStacks si défini
+      applyStateToEnemy(target, 'brule', stacks);
       if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt + ${stacks} Brûlure.`, 'good');
     } else {
       if(!comboTriggered) addLog(`Feu → ${target.name} : ${dmg} dgt (létal).`, 'good');
@@ -546,9 +620,9 @@ function applyElementEffect(el, target) {
       addLog(`Glace → ${target.name} : ${dmg} dgt + Givré.`, 'good');
     }
     if(target.hp - dmg > 0) {
-      target.givre = el.givreDuration ?? 2;
+      applyStateToEnemy(target, 'givre', el.givreDuration ?? 2);
       if(el.applyFragile) {
-        target.fragile = el.fragileDuration ?? 1;  // ← NOUVEAU : durée custom
+        applyStateToEnemy(target, 'fragile', el.fragileDuration ?? 1);
         addLog(`${target.name} devient aussi Fragile (${target.fragile} tour(s)).`, 'good');
       }
     }
@@ -564,20 +638,30 @@ function applyElementEffect(el, target) {
       addLog(`Vide → ${target.name} : ${baseDmg} dgt + Fragile + pioche 1.`, 'good');
     }
     dmg = baseDmg;
-    if(target.hp - dmg > 0) target.fragile = el.fragileDuration ?? 1;  // ← lecture override
+    if(target.hp - dmg > 0) applyStateToEnemy(target, 'fragile', el.fragileDuration ?? 1);
   }
   else if(el.elem === 'maelstrom') {
     dmg = 3;
     if(target.hp - dmg > 0) {
       const bStacks = el.bruleStacks ?? 2;
-      target.brule = (target.brule || 0) + bStacks;
-      target.givre = el.givreDuration ?? 1;
-      target.fragile = el.fragileDuration ?? 1;
+      applyStateToEnemy(target, 'brule', bStacks);
+      applyStateToEnemy(target, 'givre', el.givreDuration ?? 1);
+      applyStateToEnemy(target, 'fragile', el.fragileDuration ?? 1);
     }
     addLog(`🌀 MAELSTRÖM sur ${target.name} : ${dmg} dgt + Brûlure/Givré/Fragile appliqués.`, 'combo');
   }
 
-  target.hp = Math.max(0, target.hp - dmg);
+  // Les dégâts attaquent d'abord le bouclier ennemi
+  let remainingDmg = dmg;
+  if(target.enemyShield > 0 && remainingDmg > 0) {
+    const absorbed = Math.min(target.enemyShield, remainingDmg);
+    target.enemyShield -= absorbed;
+    remainingDmg -= absorbed;
+    if(absorbed > 0) {
+      addLog(`${target.name} : ${absorbed} dgt absorbés par son bouclier (reste ${target.enemyShield}).`, 'warn');
+    }
+  }
+  target.hp = Math.max(0, target.hp - remainingDmg);
   return dmg;
 }
 
@@ -702,16 +786,77 @@ function endTurn() {
 
   // 2. Attaques ennemies
   G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
-    if(e.stun) { addLog(`${e.name} est stunné, rate son tour.`,'info'); e.stun = false; return; }
-    let dmg = e.atk;
+    // --- Stun : passe son tour ---
+    if(e.stun) { 
+      addLog(`${e.name} est stunné, rate son tour.`,'info'); 
+      e.stun = false; 
+      // Pour le Chargé : si stunné pendant la charge, l'intention est annulée
+      if(e.intent) {
+        addLog(`${e.name} interrompt son attaque chargée !`, 'good');
+        e.intent = null;
+      }
+      return; 
+    }
+    
+    // --- Calcul de l'attaque selon l'archétype ---
+    let dmg = (e.atk + (e.atkBonus || 0));
+    let attackLabel = '';
+    
+    if(e.archetype === 'charged') {
+      if(e.intent && e.intent.type === 'charged') {
+        // Le Chargé exécute son attaque préparée
+        dmg = e.intent.damage;
+        attackLabel = `${e.name} ATTAQUE CHARGÉE`;
+        e.intent = null;
+      } else {
+        // Attaque normale
+        attackLabel = `${e.name}`;
+      }
+    } else {
+      attackLabel = `${e.name}`;
+    }
+    
+    // --- Application des dégâts (bouclier joueur d'abord) ---
     if(G.shield > 0) {
       const absorbed = Math.min(G.shield, dmg);
       G.shield -= absorbed; dmg -= absorbed;
-      addLog(`${e.name} attaque : ${absorbed} absorbé par le bouclier.`, 'warn');
+      addLog(`${attackLabel} attaque : ${absorbed} absorbé par le bouclier.`, 'warn');
     }
     if(dmg > 0) {
       G.playerHp = Math.max(0, G.playerHp - dmg);
-      addLog(`${e.name} inflige ${dmg} dgt. PV joueur : ${G.playerHp}/${G.playerMaxHp}.`, 'bad');
+      addLog(`${attackLabel} inflige ${dmg} dgt. PV joueur : ${G.playerHp}/${G.playerMaxHp}.`, 'bad');
+    }
+  });
+
+  if(G.playerHp <= 0) { 
+    addLog('☠ Tu as été vaincu.', 'bad'); 
+    onCombatDefeat();
+    return; 
+  }
+
+  // --- Décrémentation des durées d'États ---
+  G.combat.enemies.forEach(e => {
+    if(e.givre > 0) e.givre -= 1;
+    if(e.fragile > 0) e.fragile -= 1;
+  });
+
+  // === NOUVEAU : Fin de tour des ennemis selon archétype ===
+  G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
+    // Tank : régénère son bouclier
+    if(e.archetype === 'tank' && e.shieldRegen) {
+      const before = e.enemyShield;
+      e.enemyShield += e.shieldRegen;
+      addLog(`${e.name} régénère ${e.shieldRegen} bouclier (${before} → ${e.enemyShield}).`, 'warn');
+    }
+    
+    // Chargé : prépare son attaque chargée tous les N tours
+    if(e.archetype === 'charged') {
+      e.chargedCounter = (e.chargedCounter || 0) + 1;
+      if(e.chargedCounter >= (e.chargedInterval || 2)) {
+        e.intent = { type:'charged', damage: e.chargedDamage };
+        e.chargedCounter = 0;
+        addLog(`⚠️ ${e.name} prépare une attaque chargée : ${e.chargedDamage} dgt au prochain tour !`, 'warn');
+      }
     }
   });
 
@@ -997,11 +1142,30 @@ function renderCombat() {
     if(e.brule > 0)   states += `<span class="state-badge state-brule">🔥 Brûlure ${e.brule}</span>`;
     if(e.fragile > 0) states += `<span class="state-badge state-frag">💎 Fragile ${e.fragile}</span>`;
     if(e.stun)        states += `<span class="state-badge state-stun">Stunné</span>`;
+    
+    // Affichage de l'attaque (avec bonus du Catalyseur)
+    const totalAtk = e.atk + (e.atkBonus || 0);
+    const atkDisplay = e.atkBonus > 0 
+      ? `Attaque : ${totalAtk} dgt/tour <span style="color:#f5a383">(+${e.atkBonus})</span>`
+      : `Attaque : ${totalAtk} dgt/tour`;
+    
+    // Bouclier ennemi (Tank)
+    const shieldDisplay = e.enemyShield > 0
+      ? `<div style="font-size:12px;color:#8bb8e8;margin-bottom:4px;">🛡️ Bouclier : ${e.enemyShield}</div>`
+      : '';
+    
+    // Intention (Chargé)
+    const intentDisplay = e.intent
+      ? `<div style="font-size:12px;color:#f5a383;font-weight:500;margin-top:4px;">⚠️ Prépare : ${e.intent.damage} dgt !</div>`
+      : '';
+    
     return `<div class="enemy-card ${e.hp<=0?'dead':''}">
       <div class="enemy-name">${e.name}</div>
-      <div class="enemy-atk">Attaque : ${e.atk} dgt/tour</div>
+      <div class="enemy-atk">${atkDisplay}</div>
+      ${shieldDisplay}
       <div class="hp-bar-wrap"><div class="hp-bar" style="width:${pct}%"></div></div>
       <div class="hp-text">${e.hp} / ${e.maxHp} PV</div>
+      ${intentDisplay}
       <div class="states-row">${states}</div>
     </div>`;
   }).join('');
