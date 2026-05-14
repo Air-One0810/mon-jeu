@@ -169,27 +169,22 @@
 <script>
 // ============================================================
 // ZONE 1 — DONNÉES STATIQUES
-// Ce qui existe dans le jeu et ne change jamais.
 // ============================================================
 
-
-// ============================================================
-// DEV FLAGS — Modifier pour tester. Mettre à false pour build final.
-// ============================================================
 const DEV = {
-  godMode: false,        // PV bonus pour tester
-  startCombat: 0,        // 0 = combat 1, 3 = directement le Briseur
-  showHiddenInfo: false, // Affiche des infos cachées à l'écran (utile plus tard)
+  godMode: true,
+  startCombat: 0,
+  showHiddenInfo: false,
 };
 
 // ============================================================
-// MÉTA-PROGRESSION (persiste entre les runs et les sessions)
+// MÉTA-PROGRESSION
 // ============================================================
 const META_STORAGE_KEY = 'mon-jeu:meta:v1';
 
 const DEFAULT_META = {
   fragments: 0,
-  unlockedCards: [],  // ids de cartes débloquées (pour 4.2)
+  unlockedCards: [],
   totalRunsWon: 0,
   totalRunsLost: 0,
 };
@@ -199,7 +194,6 @@ function loadMeta() {
     const stored = localStorage.getItem(META_STORAGE_KEY);
     if (!stored) return { ...DEFAULT_META };
     const parsed = JSON.parse(stored);
-    // Merge avec DEFAULT_META pour gérer les nouvelles propriétés
     return { ...DEFAULT_META, ...parsed };
   } catch (e) {
     console.warn('Erreur de chargement méta, reset.', e);
@@ -236,55 +230,43 @@ const CARDS_DEF = [
 ];
 
 const REWARD_POOL = [
-  // Communes (alpha — variantes basiques)
-  { id:'feuP_1', type:'element', name:'Feu+', cost:2, effect:'4 dgt + Brûlure (2)', elem:'feu', rarity:'common', dmgOverride:4 },
-  { id:'projP_1', type:'forme', name:'Projectile+', cost:0, effect:'1 ennemi ciblé (gratuit)', forme:'proj', rarity:'common' },
-  
-  // Rares (bêta — variantes mécaniques)
-  { id:'glaceLong_1', type:'element', name:'Glace persistante', cost:2, effect:'1 dgt + Givré (3 tours)', elem:'glace', rarity:'rare', givreDuration:3 },
-  { id:'feuIntense_1', type:'element', name:'Brûlure intense', cost:2, effect:'3 dgt + Brûlure (4)', elem:'feu', rarity:'rare', bruleStacks:4 },
-  
-  // Épiques (bêta+ — fortes ou signature)
-  { id:'videInstable_1', type:'element', name:'Vide instable', cost:1, effect:'2 dgt + Fragile + pioche 2', elem:'vide', rarity:'epic', drawCount:2 },
-  { id:'armureRunique_1', type:'forme', name:'Armure runique', cost:1, effect:'+6 bouclier', forme:'arm', rarity:'epic', shieldAmount:6 },
-
-  // Consumables (catégorie spéciale)
-  { id:'regen_1', type:'consumable', name:'Régénération', cost:0, effect:'Soigne 5 PV', rarity:'rare', heal:5 },
-
-  // Effet de récompense spécial (pas une carte)
-  { id:'sceauVital_1', type:'reward_effect', name:'Sceau vital', cost:null, effect:'+5 PV max et soigne 5 PV (effet immédiat)', rarity:'epic', instantEffect:'maxHpUp', maxHpUp:5 },
-
-  // Cartes verrouillées (à débloquer via méta-progression)
-  { 
-    id:'glaceMortelle_1', type:'element', name:'Glace mortelle', 
-    cost:3, effect:'2 dgt + Givré (2 tours) + Fragile (2 tours)', 
-    elem:'glace', rarity:'rare', 
-    givreDuration:2, applyFragile:true, fragileDuration:2,  // ← NOUVEAU
+  { id:'feuP_1',       type:'element',       name:'Feu+',               cost:2,  effect:'4 dgt + Brûlure (2)',                           elem:'feu',        rarity:'common', dmgOverride:4 },
+  { id:'projP_1',      type:'forme',         name:'Projectile+',        cost:0,  effect:'1 ennemi ciblé (gratuit)',                       forme:'proj',      rarity:'common' },
+  { id:'glaceLong_1',  type:'element',       name:'Glace persistante',  cost:2,  effect:'1 dgt + Givré (3 tours)',                        elem:'glace',      rarity:'rare',   givreDuration:3 },
+  { id:'feuIntense_1', type:'element',       name:'Brûlure intense',    cost:2,  effect:'3 dgt + Brûlure (4)',                            elem:'feu',        rarity:'rare',   bruleStacks:4 },
+  { id:'videInstable_1',type:'element',      name:'Vide instable',      cost:1,  effect:'2 dgt + Fragile + pioche 2',                     elem:'vide',       rarity:'epic',   drawCount:2 },
+  { id:'armureRunique_1',type:'forme',       name:'Armure runique',     cost:1,  effect:'+6 bouclier',                                    forme:'arm',       rarity:'epic',   shieldAmount:6 },
+  { id:'regen_1',      type:'consumable',    name:'Régénération',       cost:0,  effect:'Soigne 5 PV',                                    rarity:'rare',     heal:5 },
+  { id:'sceauVital_1', type:'reward_effect', name:'Sceau vital',        cost:null,effect:'+5 PV max et soigne 5 PV (effet immédiat)',     rarity:'epic',     instantEffect:'maxHpUp', maxHpUp:5 },
+  {
+    id:'glaceMortelle_1', type:'element', name:'Glace mortelle',
+    cost:3, effect:'2 dgt + Givré (2 tours) + Fragile (2 tours)',
+    elem:'glace', rarity:'rare',
+    givreDuration:2, applyFragile:true, fragileDuration:2,
     locked:true, unlockCost:5
   },
-  { 
-    id:'maelstrom_1', type:'element', name:'Maelström', 
-    cost:3, effect:'3 dgt + Brûlure (3) + Givré (2) + Fragile (2)', 
-    elem:'maelstrom', rarity:'epic', 
-    bruleStacks:3, givreDuration:2, fragileDuration:2,  // ← NOUVEAU
+  {
+    id:'maelstrom_1', type:'element', name:'Maelström',
+    cost:3, effect:'3 dgt + Brûlure (3) + Givré (2) + Fragile (2)',
+    elem:'maelstrom', rarity:'epic',
+    bruleStacks:3, givreDuration:2, fragileDuration:2,
     locked:true, unlockCost:12
   },
 ];
 
 const ENCOUNTERS = [
-  // ============ COMBATS 1-3 : ANCIENS (tutoriel implicite) ============
-  { 
-    name:'Combat 1 — La Goule',     
-    enemies:[{ name:'Goule', maxHp:8, hp:8, atk:2 }] 
+  {
+    name:'Combat 1 — La Goule',
+    enemies:[{ name:'Goule', maxHp:8, hp:8, atk:2 }]
   },
-  { 
+  {
     name:'Combat 2 — La Sentinelle',
-    enemies:[{ name:'Sentinelle', maxHp:14, hp:14, atk:4 }] 
+    enemies:[{ name:'Sentinelle', maxHp:14, hp:14, atk:4 }]
   },
-  { 
-    name:'Combat 3 — L\'Essaim',    
+  {
+    name:'Combat 3 — L\'Essaim',
     enemies:[
-      { name:'Essaim A', maxHp:4, hp:4, atk:1 },
+      { name:'Essaim A', maxHp:4, hp:4, atk:1, startShield:2 },
       { name:'Essaim B', maxHp:4, hp:4, atk:1 },
       { name:'Essaim C', maxHp:4, hp:4, atk:1 },
     ]
@@ -296,40 +278,41 @@ const ENCOUNTERS = [
     enemies:[{ 
       name:'Bastion', maxHp:14, hp:14, atk:3,
       archetype:'tank',
-      startShield:6,
-      shieldRegen:2,
+      startShield:5,
+      shieldRegen:1,
     }]
   },
   
   // ============ COMBAT 5 : LE CATALYSEUR ============
   {
     name:'Combat 5 — Le Réacteur',
-    enemies:[{ 
+    enemies:[{
       name:'Réacteur', maxHp:10, hp:10, atk:2,
       archetype:'catalyst',
+      // Tooltip affiché dans l'UI : réagit aux COMBOS, pas aux États seuls
+      archetypeHint: 'Réagit aux combos → +1 atk',
     }]
   },
-  
-  // ============ COMBAT 6 : LE CHARGÉ ============
   {
     name:'Combat 6 — Le Berserker',
-    enemies:[{ 
+    enemies:[{
       name:'Berserker', maxHp:14, hp:14, atk:2,
       archetype:'charged',
       chargedDamage:7,
-      chargedInterval:2,  // attaque chargée tous les 2 tours
+      chargedInterval:2,
     }]
   },
-  
-  // ============ COMBAT 7 : LE BOSS ============
   {
     name:'Combat 7 — Le Briseur',
     enemies:[
-      { name:'Briseur', maxHp:10, hp:10, atk:4 },
-      { name:'Serviteur A', maxHp:3, hp:3, atk:1 },
-      { name:'Serviteur B', maxHp:3, hp:3, atk:1 }
+      { name:'Briseur',     maxHp:14, hp:14, atk:3,
+        archetype:'tank', startShield:4, shieldRegen:1 },
+      { name:'Serviteur A', maxHp:5,  hp:5,  atk:1,
+        archetype:'catalyst', archetypeHint:'Réagit aux combos → +1 atk' },
+      { name:'Serviteur B', maxHp:5,  hp:5,  atk:1,
+        archetype:'catalyst', archetypeHint:'Réagit aux combos → +1 atk' },
     ]
-  }
+  },
 ];
 
 const RARITY_WEIGHTS = [
@@ -340,7 +323,6 @@ const RARITY_WEIGHTS = [
 
 // ============================================================
 // ZONE 2 — ÉTAT DU JEU
-// L'unique source de vérité. Tout ce qui change vit ici.
 // ============================================================
 
 let G = {};
@@ -358,24 +340,16 @@ function pickRarity() {
 function generateRewardChoices(count) {
   const choices = [];
   const usedIds = new Set();
-  
-  // Filtrer le pool : on exclut les cartes verrouillées non débloquées
-  const availablePool = REWARD_POOL.filter(c => 
+  const availablePool = REWARD_POOL.filter(c =>
     !c.locked || G.meta.unlockedCards.includes(c.id)
   );
-  
   for(let i = 0; i < count; i++) {
     const rarity = pickRarity();
-    
-    let candidates = availablePool.filter(c => 
-      c.rarity === rarity && !usedIds.has(c.id)
-    );
-    
+    let candidates = availablePool.filter(c => c.rarity === rarity && !usedIds.has(c.id));
     if(candidates.length === 0) {
       candidates = availablePool.filter(c => !usedIds.has(c.id));
       if(candidates.length === 0) break;
     }
-    
     const card = candidates[Math.floor(Math.random() * candidates.length)];
     usedIds.add(card.id);
     choices.push({ ...card, id: `${card.id}_${Date.now()}_${i}` });
@@ -396,21 +370,15 @@ function newEnemy(e) {
   return {
     ...e,
     givre:0, brule:0, fragile:0, stun:false,
-    
-    // Tank : bouclier ennemi
     enemyShield: e.startShield ?? 0,
-    
-    // Chargé : intention d'attaque préparée
-    intent: null,  // { type: 'charged', damage: N } quand chargé
-    
-    // Catalyseur : tracking des États déjà appliqués (pour la réaction)
-    appliedStates: new Set(),  // contient 'givre', 'brule', 'fragile' selon ce qui a été posé
-    atkBonus: 0,  // bonus permanent accumulé via la réaction du Catalyseur
+    intent: null,
+    // ── PATCH 2 : Array au lieu de Set (sérialisable, même comportement) ──
+    appliedStates: [],
+    atkBonus: 0,
   };
 }
 
 function initRun() {
-  // Préserver la méta-progression à travers les runs
   const meta = G.meta || loadMeta();
   G = {
     meta,
@@ -420,9 +388,9 @@ function initRun() {
       deck: shuffle([...CARDS_DEF]),
       combatIndex: 0,
       combatList: [0, 1, 2, 3, 4, 5, 6],
-      fragmentsEarned: 0,  // ← NOUVEAU : Fragments gagnés pendant CETTE run
+      fragmentsEarned: 0,
     },
-    scene: 'combat',  // ← nouveau
+    scene: 'combat',
     log: [],
   };
   initCombat(0);
@@ -433,7 +401,6 @@ function initCombat(index) {
   const encounterId = run.combatList[index];
   const enc = ENCOUNTERS[encounterId];
 
-  // Régénération entre combats (sauf le premier)
   if(index > 0) {
     const HEAL_BETWEEN_COMBATS = 4;
     const healed = Math.min(run.playerMaxHp, run.playerHp + HEAL_BETWEEN_COMBATS);
@@ -467,30 +434,28 @@ function initCombat(index) {
   transitionTo('combat');
 }
 
-
 function onCombatVictory() {
   G.run.playerHp = G.playerHp;
   G.run.deck = [...G.combat.deck, ...G.combat.hand, ...G.combat.discard];
 
   const isLast = G.run.combatIndex >= G.run.combatList.length - 1;
-  
+
   const fragmentsThisCombat = isLast ? 3 : 1;
   G.run.fragmentsEarned += fragmentsThisCombat;
   addLog(`🏆 Victoire ! +${fragmentsThisCombat} Fragment(s) (total run : ${G.run.fragmentsEarned}).`, 'good');
-  
+
   if(isLast) {
     commitRunRewards(true);
-    transitionTo('meta');  // ← changé de 'runwin' à 'meta'
+    transitionTo('meta');
   } else {
     G.rewardChoices = generateRewardChoices(3);
     transitionTo('reward');
   }
 }
 
-
 function onCombatDefeat() {
   commitRunRewards(false);
-  transitionTo('meta');  // ← changé de 'gameover' à 'meta'
+  transitionTo('meta');
 }
 
 function onRewardChosen() {
@@ -500,13 +465,11 @@ function onRewardChosen() {
 
 function onUnlockCard(cardId) {
   const success = unlockCard(cardId);
-  if(success) {
-    render();  // re-rendu pour voir le résultat
-  }
+  if(success) render();
 }
 
 function onStartRun() {
-  G.lastRunResult = null;  // on efface le récap de la run précédente
+  G.lastRunResult = null;
   initRun();
 }
 
@@ -528,8 +491,7 @@ function addLog(msg, type='') {
 }
 
 // ============================================================
-// ZONE 3 — LOGIQUE PURE (ou presque)
-// Les règles du jeu. Mutations contrôlées de G.
+// ZONE 3 — LOGIQUE PURE
 // ============================================================
 
 function commitRunRewards(won) {
@@ -537,8 +499,6 @@ function commitRunRewards(won) {
   if(won) G.meta.totalRunsWon++;
   else G.meta.totalRunsLost++;
   saveMeta();
-  
-  // Mémoriser le résultat pour affichage sur l'écran méta
   G.lastRunResult = {
     won: won,
     fragmentsEarned: G.run.fragmentsEarned
@@ -547,59 +507,49 @@ function commitRunRewards(won) {
 
 function unlockCard(cardId) {
   const card = REWARD_POOL.find(c => c.id === cardId);
-  if(!card) {
-    console.error(`Carte introuvable : ${cardId}`);
-    return false;
-  }
-  if(!card.locked) {
-    console.warn(`Carte déjà déverrouillée : ${cardId}`);
-    return false;
-  }
-  if(G.meta.unlockedCards.includes(cardId)) {
-    console.warn(`Carte déjà débloquée : ${cardId}`);
-    return false;
-  }
-  if(G.meta.fragments < card.unlockCost) {
-    console.warn(`Pas assez de Fragments : ${G.meta.fragments}/${card.unlockCost}`);
-    return false;
-  }
-  
+  if(!card) { console.error(`Carte introuvable : ${cardId}`); return false; }
+  if(!card.locked) { console.warn(`Carte déjà déverrouillée : ${cardId}`); return false; }
+  if(G.meta.unlockedCards.includes(cardId)) { console.warn(`Carte déjà débloquée : ${cardId}`); return false; }
+  if(G.meta.fragments < card.unlockCost) { console.warn(`Pas assez de Fragments : ${G.meta.fragments}/${card.unlockCost}`); return false; }
   G.meta.fragments -= card.unlockCost;
   G.meta.unlockedCards.push(cardId);
   saveMeta();
   return true;
 }
 
+// ── PATCH 2 : utilise Array.includes() au lieu de Set.has() / Set.add() ──
 function applyStateToEnemy(target, stateName, value) {
-  // Si la cible avait déjà cet État, on update la valeur (pas une nouvelle application)
-  const isNew = !target.appliedStates.has(stateName);
-  
-  if(stateName === 'givre') target.givre = value;
-  else if(stateName === 'brule') target.brule = (target.brule || 0) + value;
+  if(stateName === 'givre')   target.givre = value;
+  else if(stateName === 'brule')   target.brule = (target.brule || 0) + value;
   else if(stateName === 'fragile') target.fragile = value;
-  
-  // Réaction du Catalyseur : seulement si c'est une nouvelle application
-  if(isNew && target.archetype === 'catalyst') {
-    target.atkBonus = (target.atkBonus || 0) + 1;
-    addLog(`⚡ Le ${target.name} absorbe l'État et gagne +1 attaque (total : ${target.atk + target.atkBonus}).`, 'warn');
-    target.appliedStates.add(stateName);
-  } else if(isNew) {
-    target.appliedStates.add(stateName);
+
+  if(!target.appliedStates.includes(stateName)) {
+    target.appliedStates.push(stateName);
   }
+  // Note : le Catalyseur ne réagit plus ici (voir triggerCatalystReaction)
 }
 
+// ── PATCH 3 : réaction du Catalyseur déclenchée par les COMBOS, pas les États ──
+// Appelée depuis applyElementEffect, juste après qu'une réaction est confirmée.
+function triggerCatalystReaction(target, comboName) {
+  if(target.archetype !== 'catalyst') return;
+  target.atkBonus = (target.atkBonus || 0) + 1;
+  addLog(`⚡ Réaction ! Le ${target.name} absorbe le ${comboName} et gagne +1 atk (total : ${target.atk + target.atkBonus}).`, 'warn');
+}
 
 function applyElementEffect(el, target) {
   let dmg = 0;
 
   if(el.elem === 'feu') {
-    let baseDmg = el.dmgOverride ?? 3;  // ← utilise dmgOverride si défini, sinon 3
+    let baseDmg = el.dmgOverride ?? 3;
     let comboTriggered = false;
     if(target.givre > 0) {
       baseDmg *= 2;
       target.givre = 0;
       comboTriggered = true;
       addLog(`🔥❄ CHOC THERMIQUE sur ${target.name} ! Le Feu fait ${baseDmg} dgt (x2) et consume le Givré.`, 'combo');
+      // ── PATCH 3 : combo → réaction Catalyseur ──
+      triggerCatalystReaction(target, 'Choc Thermique');
     }
     dmg = baseDmg;
     if(target.hp - dmg > 0) {
@@ -616,6 +566,8 @@ function applyElementEffect(el, target) {
       target.stun = true;
       target.fragile = 0;
       addLog(`💎❄ FRACTURE sur ${target.name} ! Stun garanti, le Fragile est consumé.`, 'combo');
+      // ── PATCH 3 : combo → réaction Catalyseur ──
+      triggerCatalystReaction(target, 'Fracture');
     } else {
       addLog(`Glace → ${target.name} : ${dmg} dgt + Givré.`, 'good');
     }
@@ -634,8 +586,10 @@ function applyElementEffect(el, target) {
       baseDmg += detonation * 2;
       target.brule = 0;
       addLog(`💥🔥 DÉTONATION sur ${target.name} ! Vide consume la Brûlure et inflige ${baseDmg} dgt total.`, 'combo');
+      // ── PATCH 3 : combo → réaction Catalyseur ──
+      triggerCatalystReaction(target, 'Détonation');
     } else {
-      addLog(`Vide → ${target.name} : ${baseDmg} dgt + Fragile + pioche 1.`, 'good');
+      addLog(`Vide → ${target.name} : ${baseDmg} dgt + Fragile + pioche.`, 'good');
     }
     dmg = baseDmg;
     if(target.hp - dmg > 0) applyStateToEnemy(target, 'fragile', el.fragileDuration ?? 1);
@@ -651,7 +605,7 @@ function applyElementEffect(el, target) {
     addLog(`🌀 MAELSTRÖM sur ${target.name} : ${dmg} dgt + Brûlure/Givré/Fragile appliqués.`, 'combo');
   }
 
-  // Les dégâts attaquent d'abord le bouclier ennemi
+  // Dégâts → bouclier ennemi en premier
   let remainingDmg = dmg;
   if(target.enemyShield > 0 && remainingDmg > 0) {
     const absorbed = Math.min(target.enemyShield, remainingDmg);
@@ -693,22 +647,19 @@ function assembleAction() {
     addLog(`${el.name} + Armure → +${shieldAmount} bouclier (total ${G.shield}).`, 'good');
   }
   else {
-    // Zone ou Projectile : on calcule les cibles, on applique l'effet
     let targets;
     if(fo.forme === 'zone') {
       targets = living;
       addLog(`${el.name} + Zone → frappe tous les ennemis :`, 'info');
     } else {
-      // Projectile : 1 seule cible
       let target;
       if(living.length === 1) target = living[0];
       else target = living[G.selectedTarget] || living[0];
       targets = [target];
     }
-    
+
     targets.forEach(e => applyElementEffect(el, e));
-    
-    // Effet spécial du Vide : pioche (mutualisé)
+
     if(el.elem === 'vide') {
       const drawCount = el.drawCount ?? 1;
       for(let i = 0; i < drawCount; i++) drawCard();
@@ -732,29 +683,20 @@ function drawCard() {
 
 function discardCard() {
   if(G.scene !== 'combat') return;
-  if(G.actionsLeft <= 0) { 
-    addLog('Tu n\'as plus d\'action ce tour.', 'warn'); 
-    render(); return; 
-  }
-  if(G.selected.length !== 1) { 
-    addLog('Sélectionne exactement 1 carte à défausser.', 'warn'); 
-    render(); return; 
-  }
-  
+  if(G.actionsLeft <= 0) { addLog('Tu n\'as plus d\'action ce tour.', 'warn'); render(); return; }
+  if(G.selected.length !== 1) { addLog('Sélectionne exactement 1 carte à défausser.', 'warn'); render(); return; }
+
   const cardId = G.selected[0];
   const card = G.combat.hand.find(c => c.id === cardId);
   if(!card) return;
-  
-  // Retirer de la main, mettre dans la défausse
+
   G.combat.hand = G.combat.hand.filter(c => c.id !== cardId);
   G.combat.discard.push(card);
   G.selected = [];
   G.actionsLeft--;
-  
-  // Piocher 1 nouvelle carte
+
   drawCard();
   addLog(`Défausse : ${card.name}. Tu pioches une nouvelle carte.`, 'info');
-  
   render();
 }
 
@@ -763,7 +705,7 @@ function checkWin() {
     onCombatVictory();
     return;
   }
-  if (G.playerHp <= 0) {
+  if(G.playerHp <= 0) {
     onCombatDefeat();
     return;
   }
@@ -786,37 +728,31 @@ function endTurn() {
 
   // 2. Attaques ennemies
   G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
-    // --- Stun : passe son tour ---
-    if(e.stun) { 
-      addLog(`${e.name} est stunné, rate son tour.`,'info'); 
-      e.stun = false; 
-      // Pour le Chargé : si stunné pendant la charge, l'intention est annulée
+    if(e.stun) {
+      addLog(`${e.name} est stunné, rate son tour.`,'info');
+      e.stun = false;
       if(e.intent) {
         addLog(`${e.name} interrompt son attaque chargée !`, 'good');
         e.intent = null;
       }
-      return; 
+      return;
     }
-    
-    // --- Calcul de l'attaque selon l'archétype ---
+
     let dmg = (e.atk + (e.atkBonus || 0));
     let attackLabel = '';
-    
+
     if(e.archetype === 'charged') {
       if(e.intent && e.intent.type === 'charged') {
-        // Le Chargé exécute son attaque préparée
         dmg = e.intent.damage;
         attackLabel = `${e.name} ATTAQUE CHARGÉE`;
         e.intent = null;
       } else {
-        // Attaque normale
         attackLabel = `${e.name}`;
       }
     } else {
       attackLabel = `${e.name}`;
     }
-    
-    // --- Application des dégâts (bouclier joueur d'abord) ---
+
     if(G.shield > 0) {
       const absorbed = Math.min(G.shield, dmg);
       G.shield -= absorbed; dmg -= absorbed;
@@ -828,19 +764,19 @@ function endTurn() {
     }
   });
 
-  if(G.playerHp <= 0) { 
-    addLog('☠ Tu as été vaincu.', 'bad'); 
+  if(G.playerHp <= 0) {
+    addLog('☠ Tu as été vaincu.', 'bad');
     onCombatDefeat();
-    return; 
+    return;
   }
 
-  // --- Décrémentation des durées d'États ---
+  // ── PATCH 1 : décrémentation des États — UNE SEULE FOIS, ici ──
   G.combat.enemies.forEach(e => {
-    if(e.givre > 0) e.givre -= 1;
+    if(e.givre > 0)   e.givre   -= 1;
     if(e.fragile > 0) e.fragile -= 1;
   });
 
-  // === NOUVEAU : Fin de tour des ennemis selon archétype ===
+  // 3. Fin de tour des ennemis (archétypes)
   G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
     // Tank : régénère son bouclier
     if(e.archetype === 'tank' && e.shieldRegen) {
@@ -848,7 +784,7 @@ function endTurn() {
       e.enemyShield += e.shieldRegen;
       addLog(`${e.name} régénère ${e.shieldRegen} bouclier (${before} → ${e.enemyShield}).`, 'warn');
     }
-    
+
     // Chargé : prépare son attaque chargée tous les N tours
     if(e.archetype === 'charged') {
       e.chargedCounter = (e.chargedCounter || 0) + 1;
@@ -860,19 +796,7 @@ function endTurn() {
     }
   });
 
-  if(G.playerHp <= 0) { 
-    addLog('☠ Tu as été vaincu.', 'bad'); 
-    onCombatDefeat();  // ← appel explicite à la transition
-    return; 
-  }
-  
-  // 3. Décrémentation des durées d'États
-  G.combat.enemies.forEach(e => {
-    if(e.givre > 0) e.givre -= 1;
-    if(e.fragile > 0) e.fragile -= 1;
-  });
-
-  // 4. Reset des stats du joueur
+  // 4. Reset joueur
   G.shield = 0; G.mana = G.maxMana; G.actionsLeft = 2;
   drawToFull();
   addLog(`--- Ton tour --- Mana ${G.mana}, Actions ${G.actionsLeft}, Main ${G.combat.hand.length}.`, 'info');
@@ -883,38 +807,34 @@ function playConsumable() {
   if(G.scene !== 'combat') return;
   if(G.actionsLeft <= 0) { addLog('Tu n\'as plus d\'action ce tour.', 'warn'); render(); return; }
   if(G.selected.length !== 1) return;
-  
+
   const cardId = G.selected[0];
   const card = G.combat.hand.find(c => c.id === cardId);
   if(!card || card.type !== 'consumable') return;
-  
+
   if(card.cost > G.mana) {
     addLog(`Pas assez de mana (besoin ${card.cost}, dispo ${G.mana}).`, 'bad');
     render(); return;
   }
-  
-  // Retirer de la main, mettre à la défausse
+
   G.combat.hand = G.combat.hand.filter(c => c.id !== cardId);
   G.combat.discard.push(card);
   G.mana -= card.cost;
   G.actionsLeft--;
   G.selected = [];
-  
-  // Appliquer l'effet
+
   if(card.heal) {
     const before = G.playerHp;
     G.playerHp = Math.min(G.playerMaxHp, G.playerHp + card.heal);
     const actualHeal = G.playerHp - before;
     addLog(`${card.name} → tu soignes ${actualHeal} PV. (${G.playerHp}/${G.playerMaxHp})`, 'good');
   }
-  // Plus tard : autres effets de consumables ici (manaBoost, drawExtra, etc.)
-  
+
   render();
 }
 
 // ============================================================
 // ZONE 5 — ÉVÉNEMENTS UTILISATEUR
-// (Volontairement avant le rendu pour que les onclick soient définis)
 // ============================================================
 
 function selectCard(id) {
@@ -923,27 +843,22 @@ function selectCard(id) {
   if(idx >= 0) { G.selected.splice(idx,1); render(); return; }
   const card = G.combat.hand.find(c=>c.id===id);
   if(!card) return;
-  
-  // Cas spécial : consumable → sélection exclusive
+
   if(card.type === 'consumable') {
     G.selected = [id];
     render();
     return;
   }
-  
-  // Si un consumable est déjà sélectionné, on le désélectionne avant
-  const consumableSelected = G.selected.some(sid => 
+
+  const consumableSelected = G.selected.some(sid =>
     G.combat.hand.find(c=>c.id===sid)?.type === 'consumable'
   );
-  if(consumableSelected) {
-    G.selected = [];
-  }
-  
-  // Logique existante pour Element/Forme
+  if(consumableSelected) G.selected = [];
+
   const alreadyEl = G.selected.some(sid => G.combat.hand.find(c=>c.id===sid)?.type==='element');
   const alreadyFo = G.selected.some(sid => G.combat.hand.find(c=>c.id===sid)?.type==='forme');
   if(card.type==='element' && alreadyEl) { addLog('Tu as déjà sélectionné un Élément.','warn'); render(); return; }
-  if(card.type==='forme' && alreadyFo) { addLog('Tu as déjà sélectionné une Forme.','warn'); render(); return; }
+  if(card.type==='forme'   && alreadyFo) { addLog('Tu as déjà sélectionné une Forme.','warn');   render(); return; }
   G.selected.push(id);
   render();
 }
@@ -961,7 +876,6 @@ function abandonRun() {
 
 // ============================================================
 // ZONE 4 — RENDU
-// L'écran est toujours une fonction de G.
 // ============================================================
 
 function selectionType() {
@@ -995,7 +909,7 @@ function canDiscard() {
 
 function assemblyDescription() {
   const t = selectionType();
-  
+
   if(t === 'consumable') {
     const card = G.combat.hand.find(c => c.id === G.selected[0]);
     return `→ ${card.name} : ${card.effect}. Coût : ${card.cost} mana.`;
@@ -1004,8 +918,8 @@ function assemblyDescription() {
   const el = sel.find(c=>c?.type==='element');
   const fo = sel.find(c=>c?.type==='forme');
   if(!el && !fo) return 'Sélectionne 1 Élément + 1 Forme dans ta main.';
-  if(el && !fo) return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
-  if(!el && fo) return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
+  if(el && !fo)  return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
+  if(!el && fo)  return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
 
   const cost = el.cost + fo.cost;
   let bonus = '';
@@ -1017,16 +931,16 @@ function assemblyDescription() {
                      G.selectedTarget !== null ? [living[G.selectedTarget]] : []);
     targets.forEach(t => {
       if(!t) return;
-      if(el.elem === 'feu' && t.givre > 0) bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${t.name} (x2)</span> `;
-      if(el.elem === 'vide' && t.brule > 0) bonus += `<span class="assembly-bonus">⚡ Détonation sur ${t.name} (+${t.brule*2} dgt)</span> `;
+      if(el.elem === 'feu'   && t.givre > 0)   bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${t.name} (x2)</span> `;
+      if(el.elem === 'vide'  && t.brule > 0)   bonus += `<span class="assembly-bonus">⚡ Détonation sur ${t.name} (+${t.brule*2} dgt)</span> `;
       if(el.elem === 'glace' && t.fragile > 0) bonus += `<span class="assembly-bonus">⚡ Fracture sur ${t.name} (stun garanti)</span> `;
     });
   }
 
   let baseDesc = '';
-  if(fo.forme === 'arm') baseDesc = `${el.name} + Armure → +4 bouclier`;
+  if(fo.forme === 'arm')  baseDesc = `${el.name} + Armure → +${fo.shieldAmount ?? 4} bouclier`;
   else if(fo.forme === 'zone') baseDesc = `${el.name} + Zone → frappe tous`;
-  else baseDesc = `${el.name} + Projectile → 1 cible`;
+  else                         baseDesc = `${el.name} + Projectile → 1 cible`;
   return `${baseDesc}. Coût : ${cost} mana. ${bonus}`;
 }
 
@@ -1040,10 +954,9 @@ function needsTargetChoice() {
 function renderMeta() {
   const meta = G.meta;
   const lastRun = G.lastRunResult;
-  
-  // 1. En-tête avec récap optionnel
+
   let headerHTML = `<h1 style="font-size:24px;font-weight:500;margin-bottom:8px;">Méta-progression</h1>`;
-  
+
   if(lastRun) {
     const title = lastRun.won ? 'Run terminée — victoire' : 'Run terminée — défaite';
     const titleColor = lastRun.won ? '#5dd4a3' : '#f5a383';
@@ -1054,8 +967,7 @@ function renderMeta() {
       </div>
     `;
   }
-  
-  // 2. Stats méta
+
   const statsHTML = `
     <div class="stats-row" style="margin-bottom:24px;">
       <div class="stat-box"><div class="stat-val" style="color:#e8c97a;">${meta.fragments}</div><div class="stat-lbl">Fragments</div></div>
@@ -1064,8 +976,7 @@ function renderMeta() {
       <div class="stat-box"><div class="stat-val">${meta.unlockedCards.length}</div><div class="stat-lbl">Cartes débloquées</div></div>
     </div>
   `;
-  
-  // 3. Liste des cartes verrouillées (avec bouton de débloquage)
+
   const lockedCards = REWARD_POOL.filter(c => c.locked && !meta.unlockedCards.includes(c.id));
   const lockedHTML = lockedCards.length > 0 ? `
     <div style="margin-bottom:24px;">
@@ -1073,14 +984,13 @@ function renderMeta() {
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
         ${lockedCards.map(c => {
           const canAfford = meta.fragments >= c.unlockCost;
-          const rarityClass = `rarity-${c.rarity}`;
           return `
-            <div class="reward-card ${rarityClass}" style="opacity:0.7;cursor:default;">
+            <div class="reward-card rarity-${c.rarity}" style="opacity:0.7;cursor:default;">
               <div class="rarity-label">${c.rarity}</div>
               <div class="card-name">🔒 ${c.name}</div>
               <div class="card-effect">${c.effect}</div>
-              <button class="btn ${canAfford?'btn-primary':''}" 
-                      onclick="onUnlockCard('${c.id}')" 
+              <button class="btn ${canAfford?'btn-primary':''}"
+                      onclick="onUnlockCard('${c.id}')"
                       ${!canAfford?'disabled':''}
                       style="margin-top:12px;width:100%;font-size:12px;">
                 Débloquer — ${c.unlockCost} Fragments
@@ -1091,28 +1001,23 @@ function renderMeta() {
       </div>
     </div>
   ` : '';
-  
-  // 4. Liste des cartes débloquées
+
   const unlockedCards = REWARD_POOL.filter(c => c.locked && meta.unlockedCards.includes(c.id));
   const unlockedHTML = unlockedCards.length > 0 ? `
     <div style="margin-bottom:24px;">
       <div class="zone-label">Cartes débloquées</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        ${unlockedCards.map(c => {
-          const rarityClass = `rarity-${c.rarity}`;
-          return `
-            <div class="reward-card ${rarityClass}" style="cursor:default;">
-              <div class="rarity-label">${c.rarity}</div>
-              <div class="card-name">✓ ${c.name}</div>
-              <div class="card-effect">${c.effect}</div>
-            </div>
-          `;
-        }).join('')}
+        ${unlockedCards.map(c => `
+          <div class="reward-card rarity-${c.rarity}" style="cursor:default;">
+            <div class="rarity-label">${c.rarity}</div>
+            <div class="card-name">✓ ${c.name}</div>
+            <div class="card-effect">${c.effect}</div>
+          </div>
+        `).join('')}
       </div>
     </div>
   ` : '';
-  
-  // 5. Bouton de lancement de run
+
   const launchHTML = `
     <div style="margin-top:32px;">
       <button class="btn btn-primary" onclick="onStartRun()" style="font-size:16px;padding:14px 24px;width:100%;">
@@ -1120,7 +1025,7 @@ function renderMeta() {
       </button>
     </div>
   `;
-  
+
   document.getElementById('app').innerHTML = `
     <div style="padding:20px 0;">
       ${headerHTML}
@@ -1142,26 +1047,29 @@ function renderCombat() {
     if(e.brule > 0)   states += `<span class="state-badge state-brule">🔥 Brûlure ${e.brule}</span>`;
     if(e.fragile > 0) states += `<span class="state-badge state-frag">💎 Fragile ${e.fragile}</span>`;
     if(e.stun)        states += `<span class="state-badge state-stun">Stunné</span>`;
-    
-    // Affichage de l'attaque (avec bonus du Catalyseur)
+
     const totalAtk = e.atk + (e.atkBonus || 0);
-    const atkDisplay = e.atkBonus > 0 
+    const atkDisplay = e.atkBonus > 0
       ? `Attaque : ${totalAtk} dgt/tour <span style="color:#f5a383">(+${e.atkBonus})</span>`
       : `Attaque : ${totalAtk} dgt/tour`;
-    
-    // Bouclier ennemi (Tank)
+
     const shieldDisplay = e.enemyShield > 0
       ? `<div style="font-size:12px;color:#8bb8e8;margin-bottom:4px;">🛡️ Bouclier : ${e.enemyShield}</div>`
       : '';
-    
-    // Intention (Chargé)
+
     const intentDisplay = e.intent
       ? `<div style="font-size:12px;color:#f5a383;font-weight:500;margin-top:4px;">⚠️ Prépare : ${e.intent.damage} dgt !</div>`
       : '';
-    
+
+    // ── PATCH 3 : affiche le hint d'archétype pour le Catalyseur ──
+    const archetypeHint = e.archetypeHint
+      ? `<div style="font-size:10px;color:#e8c97a;margin-top:3px;">⚡ ${e.archetypeHint}</div>`
+      : '';
+
     return `<div class="enemy-card ${e.hp<=0?'dead':''}">
       <div class="enemy-name">${e.name}</div>
       <div class="enemy-atk">${atkDisplay}</div>
+      ${archetypeHint}
       ${shieldDisplay}
       <div class="hp-bar-wrap"><div class="hp-bar" style="width:${pct}%"></div></div>
       <div class="hp-text">${e.hp} / ${e.maxHp} PV</div>
@@ -1170,12 +1078,10 @@ function renderCombat() {
     </div>`;
   }).join('');
 
-
   let handHTML = G.combat.hand.map(c => {
     const sel = G.selected.includes(c.id);
-    const typeLabel = c.type === 'element' ? 'Élément' : 
-                      c.type === 'forme' ? 'Forme' : 
-                      'Consumable';
+    const typeLabel = c.type === 'element' ? 'Élément' :
+                      c.type === 'forme'   ? 'Forme'   : 'Consumable';
     return `<div class="card ${c.type} ${sel?'selected':''}" onclick="selectCard('${c.id}')">
       <div class="card-type">${typeLabel}</div>
       <div class="card-name">${c.name}</div>
@@ -1196,9 +1102,9 @@ function renderCombat() {
   }
 
   const logHTML = G.log.slice(0,18).map(l=>`<div class="log-entry ${l.type}">${l.msg}</div>`).join('');
-  
+
   const t = selectionType();
-  const buttonLabel = t === 'consumable' ? 'Jouer la carte' : 'Assembler';
+  const buttonLabel  = t === 'consumable' ? 'Jouer la carte' : 'Assembler';
   const buttonAction = t === 'consumable' ? 'playConsumable()' : 'assembleAction()';
 
   app.innerHTML = `
@@ -1259,16 +1165,15 @@ function renderCombat() {
 
 function renderReward() {
   const cardsHTML = G.rewardChoices.map((c, i) => {
-    const rarityClass = `rarity-${c.rarity}`;
     const costDisplay = c.cost === null ? 'Effet permanent' : `${c.cost} mana`;
-    return `<div class="reward-card ${rarityClass}" onclick="pickReward(${i})">
+    return `<div class="reward-card rarity-${c.rarity}" onclick="pickReward(${i})">
       <div class="rarity-label">${c.rarity}</div>
       <div class="card-name">${c.name}</div>
       <div class="card-cost">${costDisplay}</div>
       <div class="card-effect">${c.effect}</div>
     </div>`;
   }).join('');
-  
+
   document.getElementById('app').innerHTML = `
     <div style="padding: 40px 20px; text-align: center;">
       <h2 style="margin-bottom: 24px;">Choisis une carte récompense</h2>
@@ -1282,21 +1187,18 @@ function renderReward() {
 
 function pickReward(index) {
   const card = G.rewardChoices[index];
-  
-  // Cas spécial : effet de récompense (pas une carte)
+
   if(card.type === 'reward_effect') {
     if(card.instantEffect === 'maxHpUp') {
       G.run.playerMaxHp += card.maxHpUp;
       G.run.playerHp = Math.min(G.run.playerMaxHp, G.run.playerHp + card.maxHpUp);
       addLog(`${card.name} → +${card.maxHpUp} PV max, soigné. (${G.run.playerHp}/${G.run.playerMaxHp})`, 'good');
     }
-    // Plus tard : autres types d'effets ici
   } else {
-    // Cas normal : carte qui rejoint le deck
     G.run.deck.push(card);
     addLog(`Carte ajoutée : ${card.name} (${card.rarity}).`, 'good');
   }
-  
+
   G.rewardChoices = null;
   onRewardChosen();
 }
@@ -1306,7 +1208,6 @@ function skipReward() {
   onRewardChosen();
 }
 
-
 function transitionTo(scene) {
   G.scene = scene;
   render();
@@ -1314,11 +1215,9 @@ function transitionTo(scene) {
 
 function render() {
   switch(G.scene) {
-    case 'combat':   renderCombat();   break;
-    case 'reward':   renderReward();   break;
-    case 'gameover': renderGameOver(); break;
-    case 'runwin':   renderRunWin();   break;
-    case 'meta':     renderMeta();     break;  // ← NOUVEAU
+    case 'combat':   renderCombat(); break;
+    case 'reward':   renderReward(); break;
+    case 'meta':     renderMeta();   break;
   }
 }
 
@@ -1326,23 +1225,20 @@ function render() {
 // DÉMARRAGE
 // ============================================================
 
-// Charger la méta au démarrage
 G.meta = loadMeta();
 
-// Pour reset depuis la console
-window.resetMeta = resetMeta;
-window.unlockCard = unlockCard;
+window.resetMeta     = resetMeta;
+window.unlockCard    = unlockCard;
 window.giveFragments = (n) => { G.meta.fragments += n; saveMeta(); console.log(`+${n} Fragments. Total : ${G.meta.fragments}`); };
-window.showMeta = () => console.log(JSON.parse(JSON.stringify(G.meta)));
+window.showMeta      = () => console.log(JSON.parse(JSON.stringify(G.meta)));
 
-// Démarrer sur l'écran méta (sauf si DEV.startCombat est activé)
 if(DEV.startCombat > 0) {
   initRun();
   G.run.combatIndex = DEV.startCombat;
   initCombat(DEV.startCombat);
 } else {
   G.scene = 'meta';
-  G.lastRunResult = null;  // pas de run terminée à afficher au tout premier démarrage
+  G.lastRunResult = null;
   render();
 }
 </script>
