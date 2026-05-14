@@ -26,6 +26,7 @@ HTML/CSS/JS pur, navigateur local, localStorage pour la méta. Pas de framework,
 - Défausse tactique : 1 action, pioche 1 carte
 - Consumables : sélection exclusive, se joue seul (1 action)
 - Bouclier ennemi : absorbe dégâts directs, pas le tick Brûlure
+- **Élan (mot-clé)** : "Gagnez +1 action et +1 mana pour ce tour uniquement."
 
 ### Archetypes ennemis
 - tank : enemyShield + shieldRegen
@@ -44,48 +45,73 @@ HTML/CSS/JS pur, navigateur local, localStorage pour la méta. Pas de framework,
 ## Direction design tranchée (méta)
 **A+C only, pas de B (puissance brute).**
 Mantra : "je gagne parce que j'ai compris, pas parce que j'ai grind."
-On collectionne : cartes (priorité 1), reliques (priorité 2 — V2), variations de départ (priorité 3 — V3).
-Cap de scope : ~10-20 cartes unlock, ~5-10 reliques, 2-3 starts.
+Cap de scope V1 : ~18 cartes unlock, ~5-10 reliques (V2), 2-3 starts (V3).
 
 **Le common sert de baseline lisible, pas d'objectif d'excitation.
 L'excitation vient des rares/epics par contraste.**
-Chaque common conservé doit jouer un rôle d'ancre mentale claire (axe dégâts / mana / défense).
+Chaque common conservé joue un rôle d'ancre mentale (dégâts / mana / défense / tempo).
 
-## Roadmap V1 (en cours) : refonte du REWARD_POOL
-Problème identifié : pool actuel 100% incrémental ("X+1 mais mieux"), zéro excitation à la récompense.
+## Doctrine d'équilibre — "Dégâts Effectifs" (DE)
+Composantes : Offensive (dgt directs + États sur 2 tours) + Défensive (bouclier + dgt évités par stun, ~5 DE/attaque) + Économique (1 carte ≈ 4 DE, 1 mana ≈ 2 DE, 1 action ≈ 5 DE).
+Cibles : common 5-8 DE, rare 10-15 DE, epic 18-30 DE (avec conditions/trade-offs marqués).
+Outil de cadrage, pas contrainte rigide.
 
-**Cadre conceptuel pour les nouvelles cartes :**
-- Pyramide tonale : common = incrémental majoritaire (B), rare = pivot, epic = transformateur majoritaire (A+C). Quelques exceptions pour éviter prévisibilité.
-- Choix douloureux : un bon paquet propose "plus solide / différemment / mieux" (3 questions différentes).
-- 4 axes de design space : Espace (hybrides), Stratégie (identité), Tempo (économie d'actions), Temps (setup différé — V1.5).
+## Roadmap V1 — Refonte REWARD_POOL
+**État : 9/12+ cartes designées, en attente d'intégration code.**
 
-**V1 — Pool cible : 12 cartes nouvelles + 3-4 incrémentales conservées**
-- 4 hybrides (combo immédiat)
-- 4 identité (transformation de run)
-- 4 économie d'actions (rupture de tempo)
-- Base incrémentale conservée comme "bruit de fond" pour créer du contraste
+### Paquet 1 — Hybrides (validé, 4 cartes)
+- **Embrasure** (rare, 3m) : 6 dgt + Brûlure(2) mono-cible, sans Givré requis. Ferme Glace.
+- **Onde de choc** (rare, 3m) : 2 dgt + 3 Brûlure + détonne immédiatement (+6 dgt), Fragile. Ferme stack-Brûlure.
+- **Brise-éclat** (rare, 3m) : 1 dgt + Fragile(1) + Stun garanti. Ferme Choc thermique.
+- **Cataclysme** (epic, 5m) : applique Brûlure(3)+Givré(2)+Fragile(2). **Élan**. Combos sur cette cible ce tour +2 dgt.
 
-**V1.5 — Setup différé (catégorie 8)**
-Cartes qui investissent maintenant pour un effet futur (ex : reste en assemblage, se déclenche T+1).
-Demande infrastructure nouvelle (zone persistante hors main, hook endTurn, rendu dédié).
-Séparée de V1 pour ne pas mélanger contenu et système.
+### Paquet 3 — Tempo (validé, 5 cartes)
+- **Étincelle** (common, Forme, 1m) : 2 dgt + Élan inconditionnel.
+- **Mémoire des cendres** (rare, Élément Feu, 2m) : 3 dgt + Brûlure(2). Si Feu en défausse → la pioche au lieu de défausser.
+- **Souffle** (rare, Forme, 2m) : assemble un Élément sans consommer d'action. Mono-cible.
+- **Stèle** (rare, Forme, 2m) : pioche 2 + action gratuite, Élément joué normalement.
+- **Cycle des Éléments** (epic, Forme, 3m) : la carte Élément retourne en main au lieu de défausse, coût mana -1 cumulatif (min 0) pour le combat.
+
+### Conservées (3 commons-ancres à retravailler comme tels)
+- Feu+ : ancre dégâts
+- Projectile+ : ancre mana/économie
+- Armure runique : ancre défense
+
+### Locked epics conservées
+- Glace mortelle (5 fragments)
+- Maelström (12 fragments)
+
+### Total V1 = 17-18 cartes dans REWARD_POOL.
+
+### Paquet 2 — Identité — REPORTÉ post-playtest
+Décision A.3 prise (slot Identité dédié dans l'UI, effet permanent run) mais infrastructure non implémentée. Reporté après playtest V1 pour valider que le besoin est réel et non théorique.
 
 ## Étapes terminées
-- ✅ Étapes 1→4.3 : core loop, scènes, récompenses, défausse, soins, consumables, fragments, cartes locked, écran méta
-- ✅ Étape 5.1 : archetypes (tank/catalyst/charged), 7 combats, applyStateToEnemy
-- ✅ Correctifs post-playtest 5.1 (doublon décrémentation, appliedStates Array, Catalyseur sur combos, états-sur-bouclier, équilibrage encounters)
-- ✅ Direction méta-progression tranchée (A+C only)
-- ✅ Diagnostic REWARD_POOL : refonte nécessaire
+- ✅ Étapes 1→5.1 : core loop, scènes, récompenses, archétypes, 7 combats
+- ✅ Correctifs post-playtest 5.1
+- ✅ Direction méta tranchée (A+C only)
+- ✅ Diagnostic + refonte REWARD_POOL (Hybrides + Tempo designés)
+- ✅ Mot-clé Élan, doctrine DE établie
 
+## Prochaine étape immédiate
+**Intégration code des 9 nouvelles cartes dans REWARD_POOL + implémentation du mot-clé Élan.**
+Modèle : Sonnet 4.6. Tâches :
+1. Ajouter le flag `elan: true` (mécanique : +1 action, +1 mana ce tour).
+2. Ajouter le flag `freeAction: true` sur les Formes Souffle/Stèle.
+3. Ajouter le flag `recycleSelf: true` + `manaReductionStack` sur Cycle.
+4. Ajouter le flag `recallFromDiscard: 'feu'` sur Mémoire des cendres.
+5. Modifier `assembleAction` pour gérer Élan, freeAction, recycle.
+6. Recalibrer pickRarity ou generateRewardChoices si besoin (vérifier distribution après ajout).
+7. Supprimer du pool : Brûlure intense, Glace persistante, Vide instable, Régénération, Sceau vital.
+8. Retravailler descriptions Feu+/Projectile+/Armure runique comme ancres mentales.
 
-## Prochaine étape
-**Co-design des 12 nouvelles cartes en session dédiée.**
-Protocole : Claude propose 12 cartes structurées → user valide sur 3 axes (excitation, lisibilité, cohérence) → itération → intégration code sur Sonnet.
-
-**Décisions de cadrage déjà prises :**
-- Identités : élémentaires (Feu / Glace / Vide), mais transformatives — chaque identité change la *façon de jouer* l'élément, pas juste le renforce.
-- REWARD_POOL : on garde Feu+, Projectile+, Armure runique (common, à retravailler comme ancres mentales : dégâts / mana / défense), Glace mortelle et Maelström (locked). On supprime Brûlure intense, Glace persistante, Vide instable, Régénération, Sceau vital.
-- Open : algo de composition des paquets de récompense (garantir 1 common par paquet ?) — à trancher en V1.
+## Étape suivante (après intégration)
+**Playtest V1 : 3-5 runs complètes en solo, notes dans IDEES.md.**
+Critères d'observation :
+- Excitation à la récompense (notable vs invisible ?)
+- Variance entre runs (les builds émergent-ils ?)
+- Lisibilité combat (Élan, recyclage, hybrides compris en jeu ?)
+- Besoin ressenti d'Identité ou non.
 
 ## Décisions de design gravées
 - Méta = palette + collection, jamais croissance brute
@@ -95,12 +121,17 @@ Protocole : Claude propose 12 cartes structurées → user valide sur 3 axes (ex
 - Séparation systèmes/contenu : ne jamais ajouter une mécanique et du contenu dans la même session
 - YAGNI, design dans la data
 - Zone = pouvoir contextuel (voulu)
+- **Doctrine DE = mesure de puissance unifiée (offensive + défensive + économique)**
+- **Élan = première famille de mécaniques (extensible aux futures cartes tempo)**
+- **Cartes d'archétype acceptées (ex : Mémoire = Feu only) ; chaque élément aura ses spécificités, pas des clones**
+- **Playtest avant nouveau contenu : pas d'Identité avant retour terrain V1**
 
 ## Questions ouvertes
-- Win rate à retester après refonte pool
-- Map de run : décision différée
-- Phase shift boss : idée différée
-- Cartes risque/récompense (cat. 4) et réactives (cat. 6) : reportées, pas abandonnées
+- Cap de main (actuellement pas de limite haute) — à trancher si Stèle déborde en playtest
+- Identité A.3 : infrastructure à concevoir post-playtest si confirmée prioritaire
+- Reliques V2 : en concurrence fonctionnelle avec Identité (toutes deux portent le "caractère de run") — playtest tranchera la priorité
+- Map de run : décision toujours différée
+- Phase shift boss : idée toujours différée
 
 ## DEV flags
 - godMode: false → 50 PV si true
