@@ -274,8 +274,9 @@ const REWARD_POOL = [
 
   // Brise-éclat : Fracture sans Fragile → ferme Choc thermique
   { id:'briseeclat_1',    type:'element', name:'Brise-éclat',
-    cost:3,  effect:'1 dgt + Fragile (1) + Stun garanti. Pas de Givré appliqué.',
-    elem:'glace', rarity:'rare', forceStun:true, applyFragile:true, fragileDuration:1 },
+    cost:3,  effect:'1 dgt + Fragile (1) + Stun garanti. Mono-cible uniquement (Projectile).',
+    elem:'glace', rarity:'rare', forceStun:true, applyFragile:true, fragileDuration:1,
+    formeRestricted:['proj'] },
 
   // Onde de choc : Détonation sans Feu → ferme stack-Brûlure
   { id:'ondechoc_1',      type:'element', name:'Onde de choc',
@@ -345,7 +346,7 @@ const ENCOUNTERS = [
     name:'Combat 4 — Le Bastion',
     enemies:[{
       name:'Bastion', maxHp:14, hp:14, atk:3,
-      archetype:'tank', startShield:5, shieldRegen:1,
+      archetype:'tank', startShield:5, shieldRegen:0,
     }]
   },
   {
@@ -467,7 +468,7 @@ function initCombat(index) {
   const enc = ENCOUNTERS[encounterId];
 
   if(index > 0) {
-    const HEAL_BETWEEN_COMBATS = 4;
+    const HEAL_BETWEEN_COMBATS = 6;
     const healed = Math.min(run.playerMaxHp, run.playerHp + HEAL_BETWEEN_COMBATS);
     const actualHeal = healed - run.playerHp;
     run.playerHp = healed;
@@ -790,6 +791,11 @@ function assembleAction() {
   const el = sel.find(c=>c.type==='element');
   const fo = sel.find(c=>c.type==='forme');
   if(!el || !fo) { addLog('Sélectionne 1 Élément + 1 Forme.','warn'); render(); return; }
+
+  if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
+    addLog(`${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.`, 'warn');
+    render(); return;
+  }
 
   const totalCost = el.cost + fo.cost;
   if(totalCost > G.mana) { addLog(`Pas assez de mana (besoin ${totalCost}, dispo ${G.mana}).`,'bad'); render(); return; }
@@ -1137,7 +1143,8 @@ function canAssemble() {
   const el = sel.find(c=>c?.type==='element');
   const fo = sel.find(c=>c?.type==='forme');
   if(!el || !fo) return false;
-  // freeAction : autorise même à 0 action
+  // Restriction de forme côté Élément
+  if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) return false;
   const hasAction = G.actionsLeft > 0 || !!fo.freeAction;
   return (el.cost + fo.cost) <= G.mana && hasAction;
 }
@@ -1187,6 +1194,9 @@ function assemblyDescription() {
   if(fo.forme === 'arm')       baseDesc = `${el.name} + ${fo.name} → +${fo.shieldAmount ?? 4} bouclier`;
   else if(fo.forme === 'zone') baseDesc = `${el.name} + Zone → frappe tous`;
   else                         baseDesc = `${el.name} + ${fo.name} → 1 cible`;
+  if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
+    return `<span style="color:#f5a383">⚠️ ${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.</span>`;
+  }
 
   // Indicateurs mécaniques
   let mecaDesc = '';

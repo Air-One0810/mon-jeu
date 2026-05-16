@@ -14,124 +14,145 @@ HTML/CSS/JS pur, navigateur local, localStorage pour la méta. Pas de framework,
 ## Patterns clés
 - État monolithique G, single source of truth
 - render() = fonction pure de G
-- transitionTo(scene) = seul point de mutation de G.scene
 - data-driven : cartes/ennemis = objets JSON
-- Opérateur ?? pour overrides (dmgOverride, givreDuration, bruleStacks…)
-- YAGNI : design dans la data, pas dans les règles spéciales
+- Opérateur ?? pour overrides + flags booléens (elan, freeAction, recycleSelf, etc.)
+- YAGNI : design dans la data
+- runLog (journal copiable) pour debug et feedback
 
-## Mécaniques de jeu
+## Mécaniques en place
 ### Combat
 - Assemblage 1 Élément + 1 Forme, max 2 actions/tour, 6 mana/tour
 - États cycliques : Glace→Givré→Feu(x2), Feu→Brûlure→Vide(détonne), Vide→Fragile→Glace(stun)
 - Défausse tactique : 1 action, pioche 1 carte
-- Consumables : sélection exclusive, se joue seul (1 action)
-- Bouclier ennemi : absorbe dégâts directs, pas le tick Brûlure
-- **Élan (mot-clé)** : "Gagnez +1 action et +1 mana pour ce tour uniquement."
+- **Mot-clé Élan** : "+1 action et +1 mana pour ce tour uniquement"
+- Bouclier ennemi : absorbe dégâts directs, pas la Brûlure
+- Restriction d'assemblage : flag `formeRestricted` (utilisé par Brise-éclat = mono-cible)
 
-### Archetypes ennemis
-- tank : enemyShield + shieldRegen
-- catalyst : +1 atk permanent quand un COMBO (pas un État) est déclenché sur lui
+### Archétypes ennemis
+- tank : enemyShield + shieldRegen (Bastion : shieldRegen=0 après fix)
+- catalyst : +1 atk permanent quand un COMBO est déclenché sur lui
 - charged : prépare attaque lourde tous les N tours
 
 ### Run
-- 7 combats : Goule, Sentinelle, Essaim, Bastion(tank), Réacteur(catalyst), Berserker(charged), Briseur(boss)
-- +4 PV soignés entre combats
+- 7 combats : Goule, Sentinelle, Essaim, Bastion, Réacteur, Berserker, Briseur
+- +6 PV soignés entre combats (calibrage validé)
 - Fragments : +1 / combat, +3 / boss
 
-### Méta-progression
+### Méta-progression (minimale)
 - localStorage clé 'mon-jeu:meta:v1'
 - G.meta : { fragments, unlockedCards[], totalRunsWon, totalRunsLost }
-
-## Direction design tranchée (méta)
-**A+C only, pas de B (puissance brute).**
-Mantra : "je gagne parce que j'ai compris, pas parce que j'ai grind."
-Cap de scope V1 : ~18 cartes unlock, ~5-10 reliques (V2), 2-3 starts (V3).
-
-**Le common sert de baseline lisible, pas d'objectif d'excitation.
-L'excitation vient des rares/epics par contraste.**
-Chaque common conservé joue un rôle d'ancre mentale (dégâts / mana / défense / tempo).
+- 2 cartes locked : Glace mortelle (5 frag) / Maelström (12 frag)
 
 ## Doctrine d'équilibre — "Dégâts Effectifs" (DE)
-Composantes : Offensive (dgt directs + États sur 2 tours) + Défensive (bouclier + dgt évités par stun, ~5 DE/attaque) + Économique (1 carte ≈ 4 DE, 1 mana ≈ 2 DE, 1 action ≈ 5 DE).
-Cibles : common 5-8 DE, rare 10-15 DE, epic 18-30 DE (avec conditions/trade-offs marqués).
-Outil de cadrage, pas contrainte rigide.
+Composantes : Offensive + Défensive + Économique.
+Cibles : common 5-8 DE, rare 10-15 DE, epic 18-30 DE.
+Calibrage actualisé post-playtest : 1 mana ≈ 4 DE (rare), 1 action seule ≈ 2 DE (5 si accompagnée de mana), 1 carte piochée ≈ 3 DE.
+**Mana = vraie contrainte. Actions = contrainte molle.** (asymétrie confirmée)
 
-## Roadmap V1 — Refonte REWARD_POOL
-**État : 9/12+ cartes designées, en attente d'intégration code.**
+## REWARD_POOL V1 — état actuel (14 cartes)
+### Commons-ancres
+- **Feu+** (common, 2m) — ancre dégâts
+- **Projectile+** (common, 0m) — ancre mana
+- **Armure runique** (common, 1m) — ancre défense
+- **Étincelle** (common Forme, 1m) — ancre tempo (Élan + 2 dgt bonus)
 
-### Paquet 1 — Hybrides (validé, 4 cartes)
-- **Embrasure** (rare, 3m) : 6 dgt + Brûlure(2) mono-cible, sans Givré requis. Ferme Glace.
-- **Onde de choc** (rare, 3m) : 2 dgt + 3 Brûlure + détonne immédiatement (+6 dgt), Fragile. Ferme stack-Brûlure.
-- **Brise-éclat** (rare, 3m) : 1 dgt + Fragile(1) + Stun garanti. Ferme Choc thermique.
-- **Cataclysme** (epic, 5m) : applique Brûlure(3)+Givré(2)+Fragile(2). **Élan**. Combos sur cette cible ce tour +2 dgt.
+### Rares (Hybrides + Tempo)
+- **Embrasure** (rare Feu, 3m) — 6 dgt + Brûlure, sans Givré requis
+- **Brise-éclat** (rare Glace, 3m) — Stun garanti + Fragile. **MONO-CIBLE (formeRestricted: ['proj'])**
+- **Onde de choc** (rare Vide, 3m) — applique 3 Brûlure + auto-détonne (~8 dgt)
+- **Mémoire des cendres** (rare Feu, 2m) — rappelle un Feu de la défausse
+- **Souffle** (rare Forme, 2m) — assemblage sans action
+- **Stèle** (rare Forme, 2m) — pioche 2 + action gratuite
 
-### Paquet 3 — Tempo (validé, 5 cartes)
-- **Étincelle** (common, Forme, 1m) : 2 dgt + Élan inconditionnel.
-- **Mémoire des cendres** (rare, Élément Feu, 2m) : 3 dgt + Brûlure(2). Si Feu en défausse → la pioche au lieu de défausser.
-- **Souffle** (rare, Forme, 2m) : assemble un Élément sans consommer d'action. Mono-cible.
-- **Stèle** (rare, Forme, 2m) : pioche 2 + action gratuite, Élément joué normalement.
-- **Cycle des Éléments** (epic, Forme, 3m) : la carte Élément retourne en main au lieu de défausse, coût mana -1 cumulatif (min 0) pour le combat.
+### Epics
+- **Cataclysme** (epic, 5m) — applique 3 États + Élan + combos +2 dgt ce tour
+- **Cycle des Éléments** (epic Forme, 3m) — Élément retourne en main, coût -1 cumulatif/combat
 
-### Conservées (3 commons-ancres à retravailler comme tels)
-- Feu+ : ancre dégâts
-- Projectile+ : ancre mana/économie
-- Armure runique : ancre défense
+### Locked
+- **Glace mortelle** (rare, 3m, 5 frag) — Givré + Fragile
+- **Maelström** (epic, 3m, 12 frag) — Brûlure + Givré + Fragile
 
-### Locked epics conservées
-- Glace mortelle (5 fragments)
-- Maelström (12 fragments)
+## Étapes terminées (10 runs playtest)
+- ✅ Core loop + scènes + récompenses + défausse + soins + consumables + fragments + écran méta
+- ✅ Archétypes (tank/catalyst/charged) + 7 combats
+- ✅ Refonte REWARD_POOL (12 nouvelles cartes + 4 ancres conservées)
+- ✅ Mot-clé Élan, doctrine DE
+- ✅ Journal de run copiable (runLog)
+- ✅ Calibrage post-playtest :
+  - Bastion : shieldRegen 1 → 0
+  - Soin inter-combat : 4 → 6 PV
+  - Brise-éclat : ajout formeRestricted:['proj'] (mono-cible)
+  - Retrait du forceCommon dans generateRewardChoices
+  - Fix bug Cycle (deep clone CARDS_DEF + restauration _origCost)
+- ✅ V1 jouable : 1ère victoire propre run 9 (8/20 PV), ressenti "dur mais juste"
 
-### Total V1 = 17-18 cartes dans REWARD_POOL.
+## Diagnostic actuel — V1 fonctionnel mais incomplet
+**Ce qui marche :**
+- Combat équilibré (Bastion, Berserker, Briseur OK)
+- Brise-éclat mono restaure l'identité des archétypes
+- Mémoire des cendres = carte pivot solide
+- Cycle = moteur honnête (pas cassée une fois Bastion calibré)
+- Envie de relancer présente
 
-### Paquet 2 — Identité — REPORTÉ post-playtest
-Décision A.3 prise (slot Identité dédié dans l'UI, effet permanent run) mais infrastructure non implémentée. Reporté après playtest V1 pour valider que le besoin est réel et non théorique.
+**Ce qui manque (ressenti joueur, run 10) :**
+- **Pas de sentiment de "build"** — accumulation, pas direction
+- Méta-progression quasi inexistante (juste 2 unlocks)
+- Souffle pas attractive (jamais jouée significativement)
+- Étincelle peu excitante mais OK
+- Réacteur trop facile (combat-respiration acceptable)
 
-## Étapes terminées
-- ✅ Étapes 1→5.1 : core loop, scènes, récompenses, archétypes, 7 combats
-- ✅ Correctifs post-playtest 5.1
-- ✅ Direction méta tranchée (A+C only)
-- ✅ Diagnostic + refonte REWARD_POOL (Hybrides + Tempo designés)
-- ✅ Mot-clé Élan, doctrine DE établie
+## Roadmap — 3 grandes étapes à venir
 
-## Prochaine étape immédiate
-**Intégration code des 9 nouvelles cartes dans REWARD_POOL + implémentation du mot-clé Élan.**
-Modèle : Sonnet 4.6. Tâches :
-1. Ajouter le flag `elan: true` (mécanique : +1 action, +1 mana ce tour).
-2. Ajouter le flag `freeAction: true` sur les Formes Souffle/Stèle.
-3. Ajouter le flag `recycleSelf: true` + `manaReductionStack` sur Cycle.
-4. Ajouter le flag `recallFromDiscard: 'feu'` sur Mémoire des cendres.
-5. Modifier `assembleAction` pour gérer Élan, freeAction, recycle.
-6. Recalibrer pickRarity ou generateRewardChoices si besoin (vérifier distribution après ajout).
-7. Supprimer du pool : Brûlure intense, Glace persistante, Vide instable, Régénération, Sceau vital.
-8. Retravailler descriptions Feu+/Projectile+/Armure runique comme ancres mentales.
+### Étape immédiate : Playtest A (3-4 runs supplémentaires)
+But : stabiliser le ressenti V1, tester Cataclysme en conditions réelles, voir si Souffle reste invisible. Critères : si tu sens encore "j'accumule" après 4 runs, on bascule sur Identité sans hésiter.
 
-## Étape suivante (après intégration)
-**Playtest V1 : 3-5 runs complètes en solo, notes dans IDEES.md.**
-Critères d'observation :
-- Excitation à la récompense (notable vs invisible ?)
-- Variance entre runs (les builds émergent-ils ?)
-- Lisibilité combat (Élan, recyclage, hybrides compris en jeu ?)
-- Besoin ressenti d'Identité ou non.
+### Étape 1 — Système Identité (A.3 confirmé)
+Découpée en 2 sessions :
+- **1.a Système** : conception slot Identité dédié (UI permanente), hook passif, gestion conflit (remplacement entre combats ?), nouveau type 'identity' dans REWARD_POOL.
+- **1.b Contenu** : co-design des 4 cartes-identité (Feu-burst, Glace-contrôle, Vide-explosion, +1). Respect du mantra "transforme la façon de jouer, ne renforce pas".
+
+### Étape 2 — Reliques V2
+S'appuie sur l'infra UI de l'Identité (slot persistant). Reliques = modificateurs structurels passifs (ex: "tous les Givrés durent +1 tour"). Demande pool dédié, hook d'apparition à définir.
+
+### Étape 3 — Méta réelle
+- 3.a : Variations de départ (2-3 decks de départ au choix avant run)
+- 3.b : Plus de cartes locked à débloquer
+- 3.c : Trophées / défis de run
+
+### Et plus tard (V3+)
+- Setup différé (catégorie 8 originale, zone persistante)
+- Map de run (chemins à la Slay the Spire)
+- Phase shift boss
+- Plus d'encounters (10-12 combats)
+
+## Prochaine action concrète
+**Faire 3-4 runs supplémentaires (playtest A).** Critères d'observation :
+- Cataclysme se déclenche-t-elle bien ?
+- Souffle vraiment morte ?
+- Cycle reste honnête ou apparaît broken ?
+- Un build émerge-t-il de lui-même ou tu accumules toujours ?
+
+À la fin du playtest : bilan + décision de lancer Étape 1.a (Système Identité).
 
 ## Décisions de design gravées
-- Méta = palette + collection, jamais croissance brute
+- Méta = palette + collection, jamais croissance brute (A+C only)
 - Pyramide tonale : common ancré, epic transformateur
-- Le common n'est pas un déchet, c'est un repère qui donne du relief
 - REWARD_POOL séparé de CARDS_DEF
 - Séparation systèmes/contenu : ne jamais ajouter une mécanique et du contenu dans la même session
 - YAGNI, design dans la data
-- Zone = pouvoir contextuel (voulu)
-- **Doctrine DE = mesure de puissance unifiée (offensive + défensive + économique)**
-- **Élan = première famille de mécaniques (extensible aux futures cartes tempo)**
-- **Cartes d'archétype acceptées (ex : Mémoire = Feu only) ; chaque élément aura ses spécificités, pas des clones**
-- **Playtest avant nouveau contenu : pas d'Identité avant retour terrain V1**
+- Doctrine DE = mesure de puissance unifiée
+- Élan = première famille de mécaniques (extensible)
+- Cartes d'archétype acceptées (Mémoire = Feu only)
+- Playtest avant nouveau contenu
+- Refus de garantir 1 rare/paquet : la variance roguelite est désirable
+- Restriction d'assemblage (formeRestricted) = pattern réutilisable pour corriger des cartes trop polyvalentes
 
 ## Questions ouvertes
-- Cap de main (actuellement pas de limite haute) — à trancher si Stèle déborde en playtest
-- Identité A.3 : infrastructure à concevoir post-playtest si confirmée prioritaire
-- Reliques V2 : en concurrence fonctionnelle avec Identité (toutes deux portent le "caractère de run") — playtest tranchera la priorité
-- Map de run : décision toujours différée
-- Phase shift boss : idée toujours différée
+- Souffle : redesign, retrait ou maintien en attente ?
+- Étincelle : peut rester common-ancre ou besoin de plus de pep ?
+- Réacteur : trop facile, à durcir ou garder comme respiration ?
+- Identité A.3 : conflit entre Identités (remplacer/cumuler ?) à trancher en session 1.a
+- Cap de main (actuellement pas de limite haute) à reconsidérer si une carte exploite
 
 ## DEV flags
 - godMode: false → 50 PV si true
@@ -139,3 +160,7 @@ Critères d'observation :
 
 ## Fonctions debug (console F12)
 - resetMeta(), unlockCard('id'), giveFragments(N), showMeta()
+
+## Ressources
+- Fichier actif : /mnt/user-data/outputs/index.html (dernière version avec tous les fixes)
+- GitHub raw : https://raw.githubusercontent.com/Air-One0810/mon-jeu/refs/heads/main/index.html
