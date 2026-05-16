@@ -459,6 +459,9 @@ function initRun() {
     scene: 'combat',
     log: [],
   };
+  // Header de run
+  runLog(`═══ NOUVELLE RUN — ${new Date().toLocaleString('fr-FR')} ═══`);
+  runLog(`PV : ${G.run.playerHp}/${G.run.playerMaxHp}`);
   initCombat(0);
 }
 
@@ -479,6 +482,10 @@ function initCombat(index) {
 
   G.encIdx = index;
   G.encName = enc.name;
+  runLog(`\n══ ${enc.name} ══`);
+  runLog(`PV début : ${run.playerHp}/${run.playerMaxHp}`);
+  const deckSummary = run.deck.map(c=>c.name).join(', ');
+  runLog(`Deck (${run.deck.length}) : ${deckSummary}`);
   G.playerHp = run.playerHp;
   G.playerMaxHp = run.playerMaxHp;
   G.shield = 0;
@@ -509,6 +516,7 @@ function onCombatVictory() {
   const fragmentsThisCombat = isLast ? 3 : 1;
   G.run.fragmentsEarned += fragmentsThisCombat;
   addLog(`🏆 Victoire ! +${fragmentsThisCombat} Fragment(s) (total run : ${G.run.fragmentsEarned}).`, 'good');
+  runLog(`→ Combat terminé — PV : ${G.playerHp}/${G.playerMaxHp} — Fragments run : ${G.run.fragmentsEarned}`);
 
   if(isLast) {
     commitRunRewards(true);
@@ -520,6 +528,7 @@ function onCombatVictory() {
 }
 
 function onCombatDefeat() {
+  runLog(`\n✗ DÉFAITE — Fragments conservés : ${G.run.fragmentsEarned}`);
   commitRunRewards(false);
   transitionTo('meta');
 }
@@ -554,6 +563,16 @@ function drawToFull() {
 function addLog(msg, type='') {
   G.log.unshift({ msg, type });
   if(G.log.length > 50) G.log.pop();
+  // Propagation vers le journal de run (texte brut, sans HTML)
+  runLog(msg);
+}
+
+// Journal de RUN — persiste à travers les combats, affichable à la fin.
+// Ne contient PAS de HTML — texte brut copiable.
+function runLog(msg) {
+  if(!G.run) return;
+  if(!G.run.runLog) G.run.runLog = [];
+  G.run.runLog.push(msg);
 }
 
 // ============================================================
@@ -1071,6 +1090,24 @@ function abandonRun() {
   transitionTo('meta');
 }
 
+function copyRunLog() {
+  if(!G.run || !G.run.runLog) return;
+  const text = G.run.runLog.join('\n');
+  navigator.clipboard.writeText(text).then(
+    () => alert('Journal copié dans le presse-papier.'),
+    () => {
+      // Fallback : afficher dans une textarea sélectionnable
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:80%;height:60%;z-index:9999;';
+      document.body.appendChild(ta);
+      ta.select();
+      alert('Sélection prête — fais Ctrl+C, puis ferme la fenêtre.');
+      ta.addEventListener('blur', () => ta.remove());
+    }
+  );
+}
+
 // ============================================================
 // ZONE 4 — RENDU
 // ============================================================
@@ -1182,6 +1219,21 @@ function renderMeta() {
       </div>`;
   }
 
+  const runLogHTML = (lastRun && G.run && G.run.runLog && G.run.runLog.length > 0) ? `
+  <div style="background:#2a2a2a;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div style="font-weight:500;">Journal de la run</div>
+      <button class="btn" onclick="copyRunLog()" style="font-size:12px;padding:4px 12px;">
+        📋 Copier le journal
+      </button>
+    </div>
+    <details>
+      <summary style="font-size:12px;color:#888;cursor:pointer;">Aperçu (cliquer pour développer)</summary>
+      <pre style="font-size:11px;color:#aaa;white-space:pre-wrap;margin-top:8px;max-height:300px;overflow-y:auto;background:#1a1a1a;padding:8px;border-radius:4px;">${G.run.runLog.join('\n')}</pre>
+    </details>
+  </div>
+` : '';
+
   const statsHTML = `
     <div class="stats-row" style="margin-bottom:24px;">
       <div class="stat-box"><div class="stat-val" style="color:#e8c97a;">${meta.fragments}</div><div class="stat-lbl">Fragments</div></div>
@@ -1237,6 +1289,7 @@ function renderMeta() {
   document.getElementById('app').innerHTML = `
     <div style="padding:20px 0;">
       ${headerHTML}
+      ${runLogHTML}
       ${statsHTML}
       ${lockedHTML}
       ${unlockedHTML}
@@ -1403,6 +1456,9 @@ function renderReward() {
 
 function pickReward(index) {
   const card = G.rewardChoices[index];
+  const allChoices = G.rewardChoices.map(c => `${c.name} [${c.rarity}]`).join(' | ');
+  runLog(`\n── Récompense — Choix proposés : ${allChoices}`);
+  runLog(`── Récompense — Choisi : ${card.name} [${card.rarity}]`);
 
   if(card.type === 'reward_effect') {
     if(card.instantEffect === 'maxHpUp') {
@@ -1420,6 +1476,9 @@ function pickReward(index) {
 }
 
 function skipReward() {
+  const allChoices = G.rewardChoices.map(c => `${c.name} [${c.rarity}]`).join(' | ');
+  runLog(`\n── Récompense — Choix proposés : ${allChoices}`);
+  runLog(`── Récompense — PASSÉE`);
   G.rewardChoices = null;
   onRewardChosen();
 }
