@@ -287,7 +287,7 @@ const REWARD_POOL = [
   { id:'cataclysme_1',    type:'element', name:'Cataclysme',
     cost:5,  effect:'Brûlure (3) + Givré (2) + Fragile (2). Élan. Combos ce tour +2 dgt.',
     elem:'cataclysme', rarity:'epic',
-    bruleStacks:3, givreDuration:2, fragileDuration:2, elan:true, comboBonus:2 },
+    bruleStacks:3, givreDuration:2, fragileDuration:2, elan:true, comboBonus:2, comboBonusDuration:2 },
 
   // ── TEMPO — économie d'actions / recyclage ───────────────────────────────
 
@@ -298,7 +298,7 @@ const REWARD_POOL = [
 
   // Souffle : action gratuite ponctuelle
   { id:'souffle_1',       type:'forme',   name:'Souffle',
-    cost:2,  effect:'1 ennemi ciblé — cet assemblage ne consomme pas d\'action.',
+    cost:1,  effect:'1 ennemi ciblé — cet assemblage ne consomme pas d\'action.',
     forme:'proj', rarity:'rare', freeAction:true },
 
   // Stèle : action gratuite + pioche 2
@@ -361,7 +361,7 @@ const ENCOUNTERS = [
     name:'Combat 6 — Le Berserker',
     enemies:[{
       name:'Berserker', maxHp:14, hp:14, atk:2,
-      archetype:'charged', chargedDamage:7, chargedInterval:2,
+      archetype:'charged', chargedDamage:6, chargedInterval:2,
     }]
   },
   {
@@ -745,6 +745,7 @@ function applyElementEffect(el, target) {
     applyStateToEnemy(target, 'givre',   el.givreDuration ?? 2);
     applyStateToEnemy(target, 'fragile', el.fragileDuration ?? 2);
     G.combat.comboBonusTurn = (G.combat.comboBonusTurn || 0) + (el.comboBonus ?? 2);
+    G.combat.comboBonusTurnsLeft = el.comboBonusDuration ?? 1;  // ← nouveau
     addLog(
       `🌋 Cataclysme → ${target.name} : Brûlure(${target.brule})+Givré(${target.givre})+Fragile(${target.fragile}). Combos ce tour +${el.comboBonus ?? 2} dgt !`,
       'combo'
@@ -945,7 +946,13 @@ function checkWin() {
 
 function endTurn() {
   // Reset du bonus combos Cataclysme au début du tour ennemi
-  G.combat.comboBonusTurn = 0;
+  // Décrémente la durée du bonus combos Cataclysme
+  if(G.combat.comboBonusTurnsLeft > 0) {
+    G.combat.comboBonusTurnsLeft--;
+    if(G.combat.comboBonusTurnsLeft === 0) {
+      G.combat.comboBonusTurn = 0;
+    }
+  }
 
   G.selected = []; G.selectedTarget = null;
   addLog('--- Tour ennemi ---', 'info');
@@ -1316,10 +1323,10 @@ function renderCombat() {
 
   // Bannière Cataclysme actif
   const comboBonusHTML = G.combat.comboBonusTurn > 0
-    ? `<div class="combo-bonus-banner">
-         🌋 Cataclysme actif — combos ce tour +${G.combat.comboBonusTurn} dgt
-       </div>`
-    : '';
+  ? `<div class="combo-bonus-banner">
+      🌋 Cataclysme actif — combos +${G.combat.comboBonusTurn} dgt (${G.combat.comboBonusTurnsLeft} tour${G.combat.comboBonusTurnsLeft>1?'s':''})
+    </div>`
+  : '';
 
   let enemyHTML = G.combat.enemies.map((e, i) => {
     const pct = Math.round((e.hp / e.maxHp) * 100);
