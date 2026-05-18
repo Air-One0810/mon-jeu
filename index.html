@@ -370,20 +370,68 @@ const REWARD_POOL = [
 // ctx contient : { game: G } — accès complet à l'état si besoin.
 // ============================================================
 const IDENTITY_POOL = [
-  // Contenu défini en session 1.b.
-  //
-  // Identité-test (décommenter pour valider l'infrastructure) :
-  // {
-  //   id: 'test_feuburst',
-  //   name: 'TEST — Feu intensifié',
-  //   elem: 'feu',
-  //   description: '[TEST] Tous tes Feu infligent +2 dgt.',
-  //   modifyElement: (el, target, ctx) => {
-  //     if(el.elem === 'feu') {
-  //       el.dmgOverride = (el.dmgOverride ?? 3) + 2;
-  //     }
-  //   },
-  // },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 🔥 Cendres Persistantes
+  // Tes Feu n'infligent plus de dgt directs. Ils appliquent +3 Brûlure
+  // (5 stacks au total au lieu de 2). Tue Choc Thermique de facto.
+  // ─────────────────────────────────────────────────────────────────────
+  {
+    id: 'identity_cendres',
+    name: 'Cendres Persistantes',
+    elem: 'feu',
+    description: 'Tes Feu n\'infligent plus de dgt directs, mais appliquent 5 Brûlure au lieu de 2.',
+    modifyElement: (el, target, ctx) => {
+      if(el.elem === 'feu') {
+        el.dmgOverride = 0;                            // Plus de dgt directs
+        el.bruleStacks = (el.bruleStacks ?? 2) + 3;    // +3 Brûlure (5 au total pour Feu de base)
+      }
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // ❄️ Étreinte Permanente
+  // Givré ne décrémente plus. Mais quand il est consumé (Choc Thermique
+  // ou Fracture), l'ennemi gagne +1 atk permanent.
+  // ─────────────────────────────────────────────────────────────────────
+  {
+    id: 'identity_etreinte',
+    name: 'Étreinte Permanente',
+    elem: 'glace',
+    description: 'Le Givré ne s\'efface plus tout seul. Quand il est consumé, l\'ennemi gagne +1 atk.',
+    // Pas de modifyElement : la règle est implémentée comme deux flags
+    // lus ailleurs dans le moteur (voir Patch 2 et Patch 3).
+    flags: { noGivreDecay: true, givreConsumeBackfire: true },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 🕳️ Implosion
+  // Vide ne fait plus piocher, ne consume plus la Brûlure.
+  // Vide inflige 2 + (nb d'États sur la cible) dgt.
+  // ─────────────────────────────────────────────────────────────────────
+  {
+    id: 'identity_implosion',
+    name: 'Implosion',
+    elem: 'vide',
+    description: 'Vide ne fait plus piocher et ne détonne plus. À la place : 2 dgt + 1 par état sur la cible.',
+    flags: { implosionMode: true },
+    // La logique custom est dans applyElementEffect (Patch 4).
+  },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 🔁 Écho
+  // La première carte jouée chaque tour déclenche son effet deux fois,
+  // sans coût supplémentaire de mana ou d'action.
+  // ─────────────────────────────────────────────────────────────────────
+  {
+    id: 'identity_echo',
+    name: 'Écho',
+    elem: 'meta',
+    description: 'La 1ère carte que tu joues chaque tour déclenche son effet une seconde fois.',
+    flags: { echoMode: true },
+    // Logique dans assembleAction (Patch 5).
+  },
+
 ];
 
 const ENCOUNTERS = [
@@ -579,6 +627,7 @@ function initCombat(index) {
     hand: [],
     discard: [],
     comboBonusTurn: 0,   // Reset au début de chaque combat et de chaque tour
+    echoUsedThisTurn: false,   // ← AJOUT : Écho disponible au début de chaque combat
   };
 
   // Fix recycleSelf : restaurer le coût d'origine des cartes
@@ -778,6 +827,11 @@ function applyElementEffect(el, target) {
       if(comboBonus) baseDmg += comboBonus;
       target.givre = 0;
       comboTriggered = true;
+      // ── ÉTREINTE PERMANENTE — backfire à la consommation ──
+      if(G.run.identity?.flags?.givreConsumeBackfire) {
+        target.atkBonus = (target.atkBonus || 0) + 1;
+        addLog(`❄→⚠ Étreinte brisée : ${target.name} gagne +1 atk (total ${target.atk + target.atkBonus}).`, 'warn');
+      }
       addLog(
         `🔥❄ CHOC THERMIQUE sur ${target.name} ! ${baseDmg} dgt (x2${comboBonus ? ' +'+comboBonus+' Cataclysme' : ''}).`,
         'combo'
@@ -813,10 +867,12 @@ function applyElementEffect(el, target) {
       // Pas de Givré — le forceStun court-circuite la branche Givré ci-dessous
 
     } else if(target.fragile > 0) {
-      // Fracture classique
       target.stun = true;
       target.fragile = 0;
       if(comboBonus) dmg += comboBonus;
+      // ── ÉTREINTE PERMANENTE — backfire si Givré est consumé par Fracture ──
+      // Note : Fracture consume Fragile, pas Givré. On n'applique PAS le backfire ici.
+      // Le backfire ne se déclenche QUE quand Givré est consumé (= Choc Thermique).
       addLog(
         `💎❄ FRACTURE sur ${target.name} ! Stun garanti${comboBonus ? ', +'+comboBonus+' dgt Cataclysme' : ''}.`,
         'combo'
@@ -842,15 +898,31 @@ function applyElementEffect(el, target) {
   // ── VIDE ──
   else if(el.elem === 'vide') {
     let baseDmg = 2;
+    const implosionMode = G.run.identity?.flags?.implosionMode;
 
-    if(el.instantDetonate) {
+    if(implosionMode) {
+      // ── IMPLOSION : compte 1 par État présent, sans rien consumer ──
+      let stateCount = 0;
+      if(target.givre > 0)   stateCount++;
+      if(target.brule > 0)   stateCount++;
+      if(target.fragile > 0) stateCount++;
+      if(target.stun)        stateCount++;
+      baseDmg = 2 + stateCount;
+      if(comboBonus) baseDmg += comboBonus;
+      addLog(
+        `🕳 IMPLOSION sur ${target.name} : ${baseDmg} dgt (2 + ${stateCount} État${stateCount>1?'s':''}${comboBonus ? ' +'+comboBonus+' Cataclysme' : ''}).`,
+        'combo'
+      );
+      // Pas de triggerCatalystReaction — Implosion n'est pas un combo classique.
+
+    } else if(el.instantDetonate) {
       // Onde de choc : applique ses stacks puis détonne tout immédiatement
       const bruStacks = el.bruleStacks ?? 3;
       target.brule = (target.brule || 0) + bruStacks;
       const totalBrule = target.brule;
       baseDmg += totalBrule * 2;
       if(comboBonus) baseDmg += comboBonus;
-      target.brule = 0;   // Pas de Brûlure résiduelle
+      target.brule = 0;
       addLog(
         `💥 Onde de choc → ${target.name} : ${totalBrule} Brûlure détonées ! ${baseDmg} dgt + Fragile.`,
         'combo'
@@ -994,6 +1066,23 @@ function assembleAction() {
     // Effet principal de l'Élément sur chaque cible
     targets.forEach(e => applyElementEffect(el, e));
 
+    // ── ÉCHO : si Identité Écho active et c'est le 1er assemblage du tour, on rejoue l'effet ──
+    const echoActive = G.run.identity?.flags?.echoMode;
+    if(echoActive && !G.combat.echoUsedThisTurn) {
+      G.combat.echoUsedThisTurn = true;
+      // Cibles re-filtrées : un ennemi peut être mort entre temps
+      const stillLiving = (fo.forme === 'zone')
+        ? G.combat.enemies.filter(e => e.hp > 0)
+        : targets.filter(e => e.hp > 0);
+
+      if(stillLiving.length > 0) {
+        addLog(`🔁 ÉCHO ! L'effet de ${el.name} + ${fo.name} se répète.`, 'combo');
+        stillLiving.forEach(e => applyElementEffect(el, e));
+      } else {
+        addLog(`🔁 Écho — cible(s) déjà éliminée(s), pas de répétition.`, 'info');
+      }
+    }
+
     // Bonus de dgt de la Forme (Étincelle) → cible principale uniquement
     if(fo.formeDmg) {
       const primaryTarget = targets[0];
@@ -1012,8 +1101,9 @@ function assembleAction() {
       }
     }
 
-    // Pioche de l'Élément (Vide de base — hors instantDetonate)
-    if(el.elem === 'vide' && !el.instantDetonate) {
+    // Pioche du Vide — désactivée par Implosion
+    const implosionMode = G.run.identity?.flags?.implosionMode;
+    if(el.elem === 'vide' && !el.instantDetonate && !implosionMode) {
       const drawCount = el.drawCount ?? 1;
       for(let i = 0; i < drawCount; i++) drawCard();
       if(drawCount > 0) addLog(`Vide → tu pioches ${drawCount} carte(s).`, 'info');
@@ -1147,8 +1237,9 @@ function endTurn() {
   }
 
   // ── PATCH 1 : décrémentation des États — UNE SEULE FOIS ──
+  const noGivreDecay = G.run.identity?.flags?.noGivreDecay;
   G.combat.enemies.forEach(e => {
-    if(e.givre > 0)   e.givre   -= 1;
+    if(e.givre > 0 && !noGivreDecay)   e.givre   -= 1;
     if(e.fragile > 0) e.fragile -= 1;
   });
 
@@ -1171,6 +1262,7 @@ function endTurn() {
 
   // 4. Reset joueur
   G.shield = 0; G.mana = G.maxMana; G.actionsLeft = 2;
+  G.combat.echoUsedThisTurn = false;   // ← AJOUT : reset Écho à chaque début de tour joueur
   drawToFull();
   addLog(`--- Ton tour --- Mana ${G.mana}, Actions ${G.actionsLeft}, Main ${G.combat.hand.length}.`, 'info');
   render();
