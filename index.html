@@ -166,6 +166,39 @@
       background: #3d2845; border-radius: 8px; padding: 6px 12px;
       font-size: 12px; color: #b29be0; font-weight: 500;
     }
+
+    /* Bandeau Identité permanent */
+    .identity-banner {
+      background: #252525; border-radius: 8px; padding: 10px 14px;
+      font-size: 12px; color: #aaa; line-height: 1.5;
+      display: flex; align-items: center; gap: 10px;
+      border-left: 3px solid #555;
+    }
+    .identity-banner.elem-feu      { border-left-color: #D85A30; }
+    .identity-banner.elem-glace    { border-left-color: #378ADD; }
+    .identity-banner.elem-vide     { border-left-color: #7F77DD; }
+    .identity-banner.empty         { opacity: 0.5; }
+    .identity-banner .id-name      { color: #fff; font-weight: 500; }
+    .identity-banner .id-desc      { color: #aaa; }
+
+    /* Carte Identité (écran de choix) */
+    .identity-card {
+      background: #252525;
+      border: 2px solid #555;
+      border-radius: 12px;
+      padding: 16px;
+      width: 220px;
+      cursor: pointer;
+      text-align: left;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .identity-card:hover { transform: translateY(-4px); border-color: #b29be0; }
+    .identity-card.elem-feu      { border-color: #D85A30; }
+    .identity-card.elem-glace    { border-color: #378ADD; }
+    .identity-card.elem-vide     { border-color: #7F77DD; }
+    .identity-card .id-label     { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 8px; font-weight: 500; }
+    .identity-card .id-title     { font-size: 15px; font-weight: 500; margin-bottom: 6px; color: #fff; }
+    .identity-card .id-text      { font-size: 12px; color: #aaa; line-height: 1.5; }
   </style>
 </head>
 <body>
@@ -325,6 +358,34 @@ const REWARD_POOL = [
     locked:true, unlockCost:12 },
 ];
 
+// ============================================================
+// IDENTITÉS — pool séparé de REWARD_POOL
+// Apparaissent après Combat 2 et Combat 4.
+// Une Identité modifie la *façon* de jouer un Élément, pas ses chiffres bruts.
+// Structure :
+//   modifyElement(el, target, ctx) → mute l'objet `el` (copie temporaire,
+//                                    safe). Appelé au début de applyElementEffect.
+//   onCombo(target, comboName, ctx) → effet additionnel sur combo
+//                                    (Pattern 2, vide pour l'instant).
+// ctx contient : { game: G } — accès complet à l'état si besoin.
+// ============================================================
+const IDENTITY_POOL = [
+  // Contenu défini en session 1.b.
+  //
+  // Identité-test (décommenter pour valider l'infrastructure) :
+  // {
+  //   id: 'test_feuburst',
+  //   name: 'TEST — Feu intensifié',
+  //   elem: 'feu',
+  //   description: '[TEST] Tous tes Feu infligent +2 dgt.',
+  //   modifyElement: (el, target, ctx) => {
+  //     if(el.elem === 'feu') {
+  //       el.dmgOverride = (el.dmgOverride ?? 3) + 2;
+  //     }
+  //   },
+  // },
+];
+
 const ENCOUNTERS = [
   {
     name:'Combat 1 — La Goule',
@@ -421,6 +482,25 @@ function generateRewardChoices(count) {
   return choices;
 }
 
+function generateIdentityChoices(count = 3) {
+  const choices = [];
+  const usedIds = new Set();
+  // Filtre : exclure l'Identité actuelle (pas de doublon dans le choix)
+  const currentId = G.run.identity?.baseId;
+  const available = IDENTITY_POOL.filter(c => c.id !== currentId);
+
+  for(let i = 0; i < count; i++) {
+    const remaining = available.filter(c => !usedIds.has(c.id));
+    if(remaining.length === 0) break;
+    const card = remaining[Math.floor(Math.random() * remaining.length)];
+    usedIds.add(card.id);
+    // Pas de timestamp suffix : les Identités sont uniques par référence,
+    // pas instanciées comme les cartes deck.
+    choices.push({ ...card, baseId: card.id });
+  }
+  return choices;
+}
+
 function shuffle(arr) {
   const a = [...arr];
   for(let i=a.length-1;i>0;i--){
@@ -452,6 +532,7 @@ function initRun() {
       combatIndex: 0,
       combatList: [0, 1, 2, 3, 4, 5, 6],
       fragmentsEarned: 0,
+      identity: null,
     },
     scene: 'combat',
     log: [],
@@ -525,6 +606,18 @@ function onCombatVictory() {
   if(isLast) {
     commitRunRewards(true);
     transitionTo('meta');
+    return;
+  }
+
+  // ── NOUVEAU : choix d'Identité après Combat 2 (index 1) et Combat 4 (index 3) ──
+  // Le choix d'Identité a lieu AVANT la récompense standard.
+  const justFinishedIndex = G.run.combatIndex;  // 0-based : Combat 2 = 1, Combat 4 = 3
+  const isIdentityCombat = (justFinishedIndex === 1 || justFinishedIndex === 3);
+
+  if(isIdentityCombat && IDENTITY_POOL.length > 0) {
+    G.identityChoices = generateIdentityChoices(3);
+    G.pendingRewardChoices = generateRewardChoices(3);  // Préparé pour après
+    transitionTo('identityChoice');
   } else {
     G.rewardChoices = generateRewardChoices(3);
     transitionTo('reward');
@@ -540,6 +633,31 @@ function onCombatDefeat() {
 function onRewardChosen() {
   G.run.combatIndex++;
   initCombat(G.run.combatIndex);
+}
+
+// ── Choix d'Identité ────────────────────────────────────────────────────────
+function pickIdentity(index) {
+  const chosen = G.identityChoices[index];
+  const previous = G.run.identity?.name ?? '(aucune)';
+  G.run.identity = { ...chosen };
+  runLog(`\n── Identité — Choisi : ${chosen.name} (remplace : ${previous})`);
+  addLog(`Identité acquise : ${chosen.name}.`, 'good');
+  proceedAfterIdentity();
+}
+
+function skipIdentity() {
+  const allChoices = G.identityChoices.map(c => c.name).join(' | ');
+  runLog(`\n── Identité — Choix proposés : ${allChoices}`);
+  runLog(`── Identité — PASSÉE`);
+  proceedAfterIdentity();
+}
+
+function proceedAfterIdentity() {
+  G.identityChoices = null;
+  // Récompense standard prévue juste après Identité
+  G.rewardChoices = G.pendingRewardChoices;
+  G.pendingRewardChoices = null;
+  transitionTo('reward');
 }
 
 function onUnlockCard(cardId) {
@@ -614,6 +732,15 @@ function applyStateToEnemy(target, stateName, value) {
 }
 
 function triggerCatalystReaction(target, comboName) {
+  // ── HOOK IDENTITÉ Pattern 2 — appelé sur tout combo déclenché ──
+  if(G.run.identity && typeof G.run.identity.onCombo === 'function') {
+    try {
+      G.run.identity.onCombo(target, comboName, { game: G });
+    } catch(e) {
+      console.error('Erreur dans onCombo de l\'Identité :', e);
+    }
+  }
+
   if(target.archetype !== 'catalyst') return;
   target.atkBonus = (target.atkBonus || 0) + 1;
   addLog(`⚡ Réaction ! Le ${target.name} absorbe le ${comboName} et gagne +1 atk (total : ${target.atk + target.atkBonus}).`, 'warn');
@@ -627,6 +754,19 @@ function triggerCatalystReaction(target, comboName) {
 function applyElementEffect(el, target) {
   let dmg = 0;
   const comboBonus = G.combat.comboBonusTurn || 0;
+
+  // ── HOOK IDENTITÉ — modifie une copie de l'Élément avant résolution ──
+  // On clone pour ne JAMAIS muter le template original (carte du deck).
+  // Le clone est éphémère : valide uniquement pour cette résolution.
+  const elInstance = { ...el };
+  if(G.run.identity && typeof G.run.identity.modifyElement === 'function') {
+    try {
+      G.run.identity.modifyElement(elInstance, target, { game: G });
+    } catch(e) {
+      console.error('Erreur dans modifyElement de l\'Identité :', e);
+    }
+  }
+  el = elInstance;  // Le reste de la fonction utilise la version modifiée
 
   // ── FEU ──
   if(el.elem === 'feu') {
@@ -1321,6 +1461,18 @@ function renderMeta() {
 function renderCombat() {
   const app = document.getElementById('app');
 
+  // ── BANDEAU IDENTITÉ ──
+  const id = G.run.identity;
+  const identityBannerHTML = id
+    ? `<div class="identity-banner elem-${id.elem}">
+         <span style="font-size:14px;">🜂</span>
+         <span><span class="id-name">${id.name}</span> — <span class="id-desc">${id.description}</span></span>
+       </div>`
+    : `<div class="identity-banner empty">
+         <span style="font-size:14px;">○</span>
+         <span class="id-desc">Aucune identité — un choix sera proposé après les combats 2 et 4.</span>
+       </div>`;
+
   // Bannière Cataclysme actif
   const comboBonusHTML = G.combat.comboBonusTurn > 0
   ? `<div class="combo-bonus-banner">
@@ -1404,6 +1556,8 @@ function renderCombat() {
       <b>Élan</b> = +1 action +1 mana ce tour.
     </div>
 
+    ${identityBannerHTML}
+
     <div>
       <div class="zone-label">${G.encName}</div>
       <div class="enemies-row">${enemyHTML}</div>
@@ -1474,6 +1628,42 @@ function renderReward() {
     </div>`;
 }
 
+function renderIdentityChoice() {
+  const choices = G.identityChoices;
+  const current = G.run.identity;
+
+  const currentHTML = current ? `
+    <div style="background:#2a2a2a;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
+      <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Identité actuelle</div>
+      <div style="font-weight:500;color:#fff;margin-bottom:4px;">${current.name}</div>
+      <div style="font-size:13px;color:#aaa;">${current.description}</div>
+      <div style="font-size:12px;color:#e8c97a;margin-top:8px;">⚠️ Choisir une nouvelle identité remplacera l'actuelle.</div>
+    </div>
+  ` : '';
+
+  const cardsHTML = choices.map((c, i) => {
+    const buttonLabel = current ? 'Remplacer' : 'Choisir';
+    return `<div class="identity-card elem-${c.elem}" onclick="pickIdentity(${i})">
+      <div class="id-label">Identité — ${c.elem}</div>
+      <div class="id-title">${c.name}</div>
+      <div class="id-text">${c.description}</div>
+      <div style="margin-top:12px;font-size:11px;color:#888;text-align:center;">→ ${buttonLabel}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div style="padding:40px 20px;text-align:center;">
+      <h2 style="margin-bottom:8px;">Une identité s'éveille</h2>
+      <p style="color:#aaa;font-size:13px;margin-bottom:24px;">Une identité transforme la façon dont tu joues un élément. Elle reste active toute la run.</p>
+      ${currentHTML}
+      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:24px;">
+        ${cardsHTML}
+      </div>
+      <button class="btn" onclick="skipIdentity()">Passer (garder l'identité actuelle)</button>
+    </div>
+  `;
+}
+
 function pickReward(index) {
   const card = G.rewardChoices[index];
   const allChoices = G.rewardChoices.map(c => `${c.name} [${c.rarity}]`).join(' | ');
@@ -1512,6 +1702,7 @@ function render() {
   switch(G.scene) {
     case 'combat':  renderCombat(); break;
     case 'reward':  renderReward(); break;
+    case 'identityChoice': renderIdentityChoice(); break;  // ← AJOUT
     case 'meta':    renderMeta();   break;
   }
 }
@@ -1526,6 +1717,8 @@ window.resetMeta     = resetMeta;
 window.unlockCard    = unlockCard;
 window.giveFragments = (n) => { G.meta.fragments += n; saveMeta(); console.log(`+${n} Fragments. Total : ${G.meta.fragments}`); };
 window.showMeta      = () => console.log(JSON.parse(JSON.stringify(G.meta)));
+window.pickIdentity = pickIdentity;
+window.skipIdentity = skipIdentity;
 
 if(DEV.startCombat > 0) {
   initRun();

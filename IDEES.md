@@ -21,3 +21,4 @@ Pour l'instant c'est un confort de dev.
 ## FOnctionnalité que j'aimerai ajouter
 
 - Système de collections (je suis fan des jeux à collection)
+- Amelioration du pool de recompense en separant en 3 slot, un élément, une forme et une ressource quelconque on pourra reflechir plus tard a quoi mettre
