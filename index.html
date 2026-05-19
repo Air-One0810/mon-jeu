@@ -399,9 +399,7 @@ const IDENTITY_POOL = [
     id: 'identity_etreinte',
     name: 'Étreinte Permanente',
     elem: 'glace',
-    description: 'Le Givré ne s\'efface plus tout seul. Quand il est consumé, l\'ennemi gagne +1 atk.',
-    // Pas de modifyElement : la règle est implémentée comme deux flags
-    // lus ailleurs dans le moteur (voir Patch 2 et Patch 3).
+    description: 'Givré ne s\'efface plus. Quand il est consumé : +1 atk à l\'ennemi, +1 Brûlure appliquée.',
     flags: { noGivreDecay: true, givreConsumeBackfire: true },
   },
 
@@ -414,9 +412,8 @@ const IDENTITY_POOL = [
     id: 'identity_implosion',
     name: 'Implosion',
     elem: 'vide',
-    description: 'Vide ne fait plus piocher et ne détonne plus. À la place : 2 dgt + 1 par état sur la cible.',
+    description: 'Vide ne fait plus piocher et ne détonne plus. Inflige 2 dgt + 1 par état présent, et pose Fragile.',
     flags: { implosionMode: true },
-    // La logique custom est dans applyElementEffect (Patch 4).
   },
 
   // ─────────────────────────────────────────────────────────────────────
@@ -428,7 +425,7 @@ const IDENTITY_POOL = [
     id: 'identity_echo',
     name: 'Écho',
     elem: 'meta',
-    description: 'La 1ère carte que tu joues chaque tour déclenche son effet une seconde fois.',
+    description: 'La 1ère carte ciblée que tu joues chaque tour déclenche son effet une seconde fois. (Ne fonctionne pas avec Zone.)',
     flags: { echoMode: true },
     // Logique dans assembleAction (Patch 5).
   },
@@ -659,7 +656,7 @@ function onCombatVictory() {
     return;
   }
 
-  // ── NOUVEAU : choix d'Identité après Combat 2 (index 1) et Combat 4 (index 3) ──
+  // ── NOUVEAU : choix d'Identité après Combat 2 (index 1)
   // Le choix d'Identité a lieu AVANT la récompense standard.
   const justFinishedIndex = G.run.combatIndex;  // 0-based : Combat 2 = 1, Combat 4 = 3
   const isIdentityCombat = (justFinishedIndex === 1);  // Combat 2 uniquement
@@ -832,6 +829,10 @@ function applyElementEffect(el, target) {
       if(G.run.identity?.flags?.givreConsumeBackfire) {
         target.atkBonus = (target.atkBonus || 0) + 1;
         addLog(`❄→⚠ Étreinte brisée : ${target.name} gagne +1 atk (total ${target.atk + target.atkBonus}).`, 'warn');
+        // ── NOUVEAU : engine Brûlure ──
+        target.brule = (target.brule || 0) + 1;
+        if(!target.appliedStates.includes('brule')) target.appliedStates.push('brule');
+        addLog(`❄→🔥 La rupture du Givré laisse +1 Brûlure sur ${target.name}.`, 'good');
       }
       addLog(
         `🔥❄ CHOC THERMIQUE sur ${target.name} ! ${baseDmg} dgt (x2${comboBonus ? ' +'+comboBonus+' Cataclysme' : ''}).`,
@@ -1028,15 +1029,13 @@ function assembleAction() {
   // Déduction des ressources
   // Coût total (avec friction Écho sur le 1er assemblage du tour)
   const echoActive = G.run.identity?.flags?.echoMode;
-  const isFirstThisTurn = echoActive && !G.combat.echoUsedThisTurn;
+  const echoEligible = echoActive && fo.forme !== 'zone';
+  const isFirstThisTurn = echoEligible && !G.combat.echoUsedThisTurn;
   let actualCost = totalCost;
-  if(isFirstThisTurn) {
-    actualCost += 1;
-    if(actualCost > G.mana) {
-      addLog(`Pas assez de mana pour Écho (besoin ${actualCost} avec friction, dispo ${G.mana}).`, 'bad');
-      render(); return;
-    }
-    addLog(`🔁 Friction Écho : +1 mana de coût pour ce 1er assemblage.`, 'info');
+  if(isFirstThisTurn) { actualCost += 1; }
+  if(actualCost > G.mana) {
+    addLog(`Pas assez de mana...`, 'bad');
+    render(); return;
   }
   G.mana -= actualCost;
   if(!fo.freeAction) G.actionsLeft--;   // freeAction = action non consommée
@@ -1080,13 +1079,10 @@ function assembleAction() {
 
     // ── ÉCHO : si Identité Écho active et c'est le 1er assemblage du tour, on rejoue l'effet ──
     const echoActive = G.run.identity?.flags?.echoMode;
-    if(echoActive && !G.combat.echoUsedThisTurn) {
+    const echoEligible = echoActive && fo.forme !== 'zone';  // ← Zone exclue
+    if(echoEligible && !G.combat.echoUsedThisTurn) {
       G.combat.echoUsedThisTurn = true;
-      // Cibles re-filtrées : un ennemi peut être mort entre temps
-      const stillLiving = (fo.forme === 'zone')
-        ? G.combat.enemies.filter(e => e.hp > 0)
-        : targets.filter(e => e.hp > 0);
-
+      const stillLiving = targets.filter(e => e.hp > 0);
       if(stillLiving.length > 0) {
         addLog(`🔁 ÉCHO ! L'effet de ${el.name} + ${fo.name} se répète.`, 'combo');
         stillLiving.forEach(e => applyElementEffect(el, e));
@@ -1396,10 +1392,12 @@ function canAssemble() {
   const el = sel.find(c=>c?.type==='element');
   const fo = sel.find(c=>c?.type==='forme');
   if(!el || !fo) return false;
-  // Restriction de forme côté Élément
   if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) return false;
   const hasAction = G.actionsLeft > 0 || !!fo.freeAction;
-  return (el.cost + fo.cost) <= G.mana && hasAction;
+  const echoActive = G.run.identity?.flags?.echoMode;
+  const isFirstThisTurn = echoActive && !G.combat.echoUsedThisTurn;
+  const totalCost = el.cost + fo.cost + (isFirstThisTurn ? 1 : 0);
+  return totalCost <= G.mana && hasAction;
 }
 
 function canDiscard() {
@@ -1421,7 +1419,19 @@ function assemblyDescription() {
   if(el && !fo)  return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
   if(!el && fo)  return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
 
-  const cost = el.cost + fo.cost;
+  // ── Application des modifications d'Identité pour aperçu ──
+  // On clone temporairement pour ne pas muter le template
+  const elPreview = { ...el };
+  const foPreview = { ...fo };
+  if(G.run.identity?.modifyElement) {
+    try { G.run.identity.modifyElement(elPreview, null, { game: G }); } catch(e) {}
+  }
+
+  const baseCost = el.cost + fo.cost;
+  const echoActive = G.run.identity?.flags?.echoMode;
+  const isFirstThisTurn = echoActive && !G.combat.echoUsedThisTurn;
+  const cost = baseCost + (isFirstThisTurn ? 1 : 0);
+  const costSuffix = isFirstThisTurn ? ` <span style="color:#b29be0">(+1 friction Écho)</span>` : '';
   let bonus = '';
 
   // Aperçus de combos sur les cibles
@@ -1442,11 +1452,32 @@ function assemblyDescription() {
       bonus += `<span class="assembly-bonus">🌋 Élan + combos ce tour +${el.comboBonus ?? 2} dgt</span> `;
   }
 
+  // Description adaptée à l'Identité
+  let elDesc = elPreview.name;
+  const id = G.run.identity;
+
+  if(id?.id === 'identity_cendres' && elPreview.elem === 'feu') {
+    elDesc += ` (0 dgt + ${elPreview.bruleStacks ?? 5} Brûlure)`;
+  } else if(id?.flags?.implosionMode && elPreview.elem === 'vide') {
+    let stateCount = 0;
+    const living = G.combat.enemies.filter(e=>e.hp>0);
+    const previewTarget = fo.forme === 'zone' ? living[0] :
+                          (G.selectedTarget !== null ? living[G.selectedTarget] : living[0]);
+    if(previewTarget) {
+      if(previewTarget.givre > 0)   stateCount += 1;
+      if(previewTarget.brule > 0)   stateCount += previewTarget.brule;
+      if(previewTarget.fragile > 0) stateCount += 1;
+      if(previewTarget.stun)        stateCount += 1;
+    }
+    elDesc += ` (Implosion : ${2 + stateCount} dgt)`;
+  } else if(id?.flags?.noGivreDecay && elPreview.elem === 'glace') {
+    elDesc += ` (Givré permanent)`;
+  }
   // Description de la Forme
   let baseDesc = '';
-  if(fo.forme === 'arm')       baseDesc = `${el.name} + ${fo.name} → +${fo.shieldAmount ?? 4} bouclier`;
-  else if(fo.forme === 'zone') baseDesc = `${el.name} + Zone → frappe tous`;
-  else                         baseDesc = `${el.name} + ${fo.name} → 1 cible`;
+  if(fo.forme === 'arm')       baseDesc = `${el.elDesc} + ${fo.name} → +${fo.shieldAmount ?? 4} bouclier`;
+  else if(fo.forme === 'zone') baseDesc = `${el.elDesc} + Zone → frappe tous`;
+  else                         baseDesc = `${el.elDesc} + ${fo.name} → 1 cible`;
   if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
     return `<span style="color:#f5a383">⚠️ ${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.</span>`;
   }
@@ -1458,7 +1489,7 @@ function assemblyDescription() {
   if(fo.drawCount)   mecaDesc += ` <span style="color:#8bb8e8">Pioche ${fo.drawCount}.</span>`;
   if(el.elan || fo.elan) mecaDesc += ` <span class="assembly-bonus">Élan.</span>`;
 
-  return `${baseDesc}. Coût : ${cost} mana.${mecaDesc} ${bonus}`;
+  return `${baseDesc}. Coût : ${cost} mana${costSuffix}${mecaDesc} ${bonus}`;
 }
 
 function needsTargetChoice() {
