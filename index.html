@@ -380,13 +380,14 @@ const IDENTITY_POOL = [
     id: 'identity_cendres',
     name: 'Cendres Persistantes',
     elem: 'feu',
-    description: 'Tes Feu n\'infligent plus de dgt directs, mais appliquent 5 Brûlure au lieu de 2.',
+    description: 'Tes Feu n\'infligent plus de dgt directs, mais appliquent 5 Brûlure au lieu de 2. Ta Brûlure brûle 2 fois plus fort.',
     modifyElement: (el, target, ctx) => {
       if(el.elem === 'feu') {
         el.dmgOverride = 0;                            // Plus de dgt directs
         el.bruleStacks = (el.bruleStacks ?? 2) + 3;    // +3 Brûlure (5 au total pour Feu de base)
       }
     },
+    flags: { bruleDoubleTick: true },
   },
 
   // ─────────────────────────────────────────────────────────────────────
@@ -661,7 +662,7 @@ function onCombatVictory() {
   // ── NOUVEAU : choix d'Identité après Combat 2 (index 1) et Combat 4 (index 3) ──
   // Le choix d'Identité a lieu AVANT la récompense standard.
   const justFinishedIndex = G.run.combatIndex;  // 0-based : Combat 2 = 1, Combat 4 = 3
-  const isIdentityCombat = (justFinishedIndex === 1 || justFinishedIndex === 3);
+  const isIdentityCombat = (justFinishedIndex === 1);  // Combat 2 uniquement
 
   if(isIdentityCombat && IDENTITY_POOL.length > 0) {
     G.identityChoices = generateIdentityChoices(3);
@@ -901,12 +902,11 @@ function applyElementEffect(el, target) {
     const implosionMode = G.run.identity?.flags?.implosionMode;
 
     if(implosionMode) {
-      // ── IMPLOSION : compte 1 par État présent, sans rien consumer ──
       let stateCount = 0;
-      if(target.givre > 0)   stateCount++;
-      if(target.brule > 0)   stateCount++;
-      if(target.fragile > 0) stateCount++;
-      if(target.stun)        stateCount++;
+      if(target.givre > 0)   stateCount += 1;
+      if(target.brule > 0)   stateCount += target.brule;  // ← scale sur stacks
+      if(target.fragile > 0) stateCount += 1;
+      if(target.stun)        stateCount += 1;
       baseDmg = 2 + stateCount;
       if(comboBonus) baseDmg += comboBonus;
       addLog(
@@ -1026,7 +1026,19 @@ function assembleAction() {
   }
 
   // Déduction des ressources
-  G.mana -= totalCost;
+  // Coût total (avec friction Écho sur le 1er assemblage du tour)
+  const echoActive = G.run.identity?.flags?.echoMode;
+  const isFirstThisTurn = echoActive && !G.combat.echoUsedThisTurn;
+  let actualCost = totalCost;
+  if(isFirstThisTurn) {
+    actualCost += 1;
+    if(actualCost > G.mana) {
+      addLog(`Pas assez de mana pour Écho (besoin ${actualCost} avec friction, dispo ${G.mana}).`, 'bad');
+      render(); return;
+    }
+    addLog(`🔁 Friction Écho : +1 mana de coût pour ce 1er assemblage.`, 'info');
+  }
+  G.mana -= actualCost;
   if(!fo.freeAction) G.actionsLeft--;   // freeAction = action non consommée
 
   // Retrait des cartes de la main
@@ -1188,11 +1200,13 @@ function endTurn() {
   addLog('--- Tour ennemi ---', 'info');
 
   // 1. Tick des Brûlures
+  const bruleDoubleTick = G.run.identity?.flags?.bruleDoubleTick;
   G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
     if(e.brule > 0) {
-      e.hp = Math.max(0, e.hp - 1);
+      const tickDmg = bruleDoubleTick ? 2 : 1;
+      e.hp = Math.max(0, e.hp - tickDmg);
       e.brule -= 1;
-      addLog(`${e.name} subit 1 dgt de Brûlure (${e.brule} restante).`, 'good');
+      addLog(`${e.name} subit ${tickDmg} dgt de Brûlure (${e.brule} restante).`, 'good');
     }
   });
   checkWin();
