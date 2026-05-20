@@ -199,6 +199,34 @@
     .identity-card .id-label     { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #888; margin-bottom: 8px; font-weight: 500; }
     .identity-card .id-title     { font-size: 15px; font-weight: 500; margin-bottom: 6px; color: #fff; }
     .identity-card .id-text      { font-size: 12px; color: #aaa; line-height: 1.5; }
+
+    /* ── Carte Relique (écran de choix) ── */
+    .relic-card {
+      background: #252525; border: 2px solid #e8c97a;
+      border-radius: 12px; padding: 16px; width: 220px;
+      cursor: pointer; text-align: left;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .relic-card:hover { transform: translateY(-4px); border-color: #f0d060; }
+    .relic-card.rarity-rare  { border-color: #d4a23d; box-shadow: 0 0 12px rgba(212,162,61,0.3); }
+    .relic-card.rarity-epic  { border-color: #f0c040; box-shadow: 0 0 16px rgba(240,192,64,0.4); }
+    .relic-card .relic-label { font-size:10px; text-transform:uppercase; letter-spacing:0.1em; color:#e8c97a; margin-bottom:8px; font-weight:500; }
+    .relic-card .relic-title { font-size:15px; font-weight:500; margin-bottom:6px; color:#fff; }
+    .relic-card .relic-text  { font-size:12px; color:#aaa; line-height:1.5; }
+
+    /* ── Bandeau Reliques (combat) ── */
+    .relic-banner {
+      background: #252525; border-radius: 8px; padding: 8px 14px;
+      font-size: 12px; color: #aaa; line-height: 1.5;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      border-left: 3px solid #e8c97a;
+    }
+    .relic-banner.empty { opacity: 0.5; border-left-color: #555; }
+    .relic-tag {
+      background: #3d3020; border: 1px solid rgba(232,201,122,0.25);
+      border-radius: 4px; padding: 2px 8px;
+      color: #e8c97a; font-size: 11px; font-weight: 500;
+    }
   </style>
 </head>
 <body>
@@ -445,6 +473,33 @@ const IDENTITY_POOL = [
 
 ];
 
+// ============================================================
+// RELIQUES — pool séparé d'IDENTITY_POOL et REWARD_POOL.
+// Apparaît après Combat 4 (et Combat 6 en V2).
+// Une Relique = modificateur structurel passif permanent.
+// Hooks optionnels (même pattern que les Identités) :
+//   onCombatStart(ctx)               → effet au début de chaque combat
+//   previewCost(cost, el, fo, ctx)   → modifie l'affichage du coût
+//   previewElement(el, target, ctx)  → modifie l'affichage de l'effet
+// ============================================================
+const RELIC_POOL = [
+
+  // ── Relique de test — remplacée en session 2.b ──────────────────────
+  // Vérifie que l'infrastructure est correctement câblée.
+  {
+    id: 'relic_forge',
+    name: 'Forge Ancestrale',
+    description: 'Au début de chaque combat, tu gagnes +1 mana pour ce tour.',
+    rarity: 'common',
+    onCombatStart: (ctx) => {
+      ctx.game.mana += 1;
+      addLog('⚙️ Forge Ancestrale : +1 mana ce tour.', 'info');
+    },
+    previewCost: (currentCost, el, fo, ctx) => currentCost,
+  },
+
+];
+
 const ENCOUNTERS = [
   {
     name:'Combat 1 — La Goule',
@@ -560,6 +615,23 @@ function generateIdentityChoices(count = 3) {
   return choices;
 }
 
+function generateRelicChoices(count = 3) {
+  const choices = [];
+  const usedIds = new Set();
+  // Exclure les reliques déjà équipées (pas de doublon en V2+)
+  const ownedIds = new Set((G.run.relics ?? []).map(r => r.baseId));
+  const available = RELIC_POOL.filter(r => !ownedIds.has(r.id));
+
+  for (let i = 0; i < count; i++) {
+    const remaining = available.filter(r => !usedIds.has(r.id));
+    if (remaining.length === 0) break;
+    const relic = remaining[Math.floor(Math.random() * remaining.length)];
+    usedIds.add(relic.id);
+    choices.push({ ...relic, baseId: relic.id });
+  }
+  return choices;
+}
+
 function shuffle(arr) {
   const a = [...arr];
   for(let i=a.length-1;i>0;i--){
@@ -592,6 +664,7 @@ function initRun() {
       combatList: [0, 1, 2, 3, 4, 5, 6],
       fragmentsEarned: 0,
       identity: null,
+      relics: [],
     },
     scene: 'combat',
     log: [],
@@ -650,6 +723,8 @@ function initCombat(index) {
 
   drawToFull();
   addLog(`--- ${enc.name} --- Mana ${G.mana}, Actions ${G.actionsLeft}.`, 'info');
+  // Effets de début de combat des Reliques actives
+  applyRelicEffects('onCombatStart');
   transitionTo('combat');
 }
 
@@ -671,17 +746,27 @@ function onCombatVictory() {
 
   // ── NOUVEAU : choix d'Identité après Combat 2 (index 1)
   // Le choix d'Identité a lieu AVANT la récompense standard.
-  const justFinishedIndex = G.run.combatIndex;  // 0-based : Combat 2 = 1, Combat 4 = 3
-  const isIdentityCombat = (justFinishedIndex === 1);  // Combat 2 uniquement
+  const justFinishedIndex = G.run.combatIndex;
 
-  if(isIdentityCombat && IDENTITY_POOL.length > 0) {
-    G.identityChoices = generateIdentityChoices(3);
-    G.pendingRewardChoices = generateRewardChoices(3);  // Préparé pour après
+  // Combat 2 (index 1) → Identité, puis récompense
+  if (justFinishedIndex === 1 && IDENTITY_POOL.length > 0) {
+    G.identityChoices    = generateIdentityChoices(3);
+    G.pendingRewardChoices = generateRewardChoices(3);
     transitionTo('identityChoice');
-  } else {
-    G.rewardChoices = generateRewardChoices(3);
-    transitionTo('reward');
+    return;
   }
+
+  // Combat 4 (index 3) → Relique, puis récompense
+  if (justFinishedIndex === 3 && RELIC_POOL.length > 0) {
+    G.relicChoices       = generateRelicChoices(3);
+    G.pendingRewardChoices = generateRewardChoices(3);
+    transitionTo('relicChoice');
+    return;
+  }
+
+  // Autres combats → récompense directe
+  G.rewardChoices = generateRewardChoices(3);
+  transitionTo('reward');
 }
 
 function onCombatDefeat() {
@@ -710,6 +795,28 @@ function skipIdentity() {
   runLog(`\n── Identité — Choix proposés : ${allChoices}`);
   runLog(`── Identité — PASSÉE`);
   proceedAfterIdentity();
+}
+
+function pickRelic(index) {
+  const chosen = G.relicChoices[index];
+  G.run.relics.push({ ...chosen });
+  runLog(`\n── Relique — Choisie : ${chosen.name}`);
+  addLog(`Relique acquise : ${chosen.name}.`, 'good');
+  proceedAfterRelic();
+}
+
+function skipRelic() {
+  const allChoices = G.relicChoices.map(r => r.name).join(' | ');
+  runLog(`\n── Relique — Choix proposés : ${allChoices}`);
+  runLog(`── Relique — PASSÉE`);
+  proceedAfterRelic();
+}
+
+function proceedAfterRelic() {
+  G.relicChoices = null;
+  G.rewardChoices = G.pendingRewardChoices;
+  G.pendingRewardChoices = null;
+  transitionTo('reward');
 }
 
 function proceedAfterIdentity() {
@@ -767,6 +874,21 @@ function commitRunRewards(won) {
   else G.meta.totalRunsLost++;
   saveMeta();
   G.lastRunResult = { won, fragmentsEarned: G.run.fragmentsEarned };
+}
+
+// Dispatch d'un trigger vers toutes les reliques actives.
+// trigger = nom de la méthode hook ('onCombatStart', etc.)
+// ctx     = données contextuelles additionnelles si besoin
+function applyRelicEffects(trigger, ctx = {}) {
+  for (const relic of G.run.relics ?? []) {
+    if (typeof relic[trigger] === 'function') {
+      try {
+        relic[trigger]({ game: G, ...ctx });
+      } catch(e) {
+        console.error(`Erreur relique "${relic.name}" (${trigger}) :`, e);
+      }
+    }
+  }
 }
 
 function unlockCard(cardId) {
@@ -1448,9 +1570,9 @@ function assemblyDescription() {
     displayCost = G.run.identity.previewCost(displayCost, el, fo, ctx);
   }
   // Reliques — même pipeline, prêt pour session 2.b :
-  // for (const relic of G.run.relics ?? []) {
-  //   if (relic.previewCost) displayCost = relic.previewCost(displayCost, el, fo, ctx);
-  // }
+  for (const relic of G.run.relics ?? []) {
+    if (relic.previewCost) displayCost = relic.previewCost(displayCost, el, fo, ctx);
+  }
 
   const baseCost = el.cost + fo.cost;
   const hasCostMod = displayCost !== baseCost;
@@ -1635,6 +1757,18 @@ function renderCombat() {
          <span style="font-size:14px;">○</span>
          <span class="id-desc">Aucune identité — un choix sera proposé après les combats 2 et 4.</span>
        </div>`;
+  
+  // ── BANDEAU RELIQUES ──
+  const relics = G.run.relics ?? [];
+  const relicBannerHTML = relics.length > 0
+    ? `<div class="relic-banner">
+        <span style="font-size:14px;">⚙️</span>
+        ${relics.map(r => `<span class="relic-tag">${r.name}</span>`).join('')}
+      </div>`
+    : `<div class="relic-banner empty">
+        <span style="font-size:14px;">○</span>
+        <span>Aucune relique — un choix sera proposé après le combat 4.</span>
+      </div>`;
 
   // Bannière Cataclysme actif
   const comboBonusHTML = G.combat.comboBonusTurn > 0
@@ -1720,6 +1854,7 @@ function renderCombat() {
     </div>
 
     ${identityBannerHTML}
+    ${relicBannerHTML}
 
     <div>
       <div class="zone-label">${G.encName}</div>
@@ -1827,6 +1962,40 @@ function renderIdentityChoice() {
   `;
 }
 
+function renderRelicChoice() {
+  const choices = G.relicChoices;
+  const owned   = G.run.relics ?? [];
+
+  const ownedHTML = owned.length > 0 ? `
+    <div style="background:#2a2a2a;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
+      <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Reliques actives</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${owned.map(r => `<span class="relic-tag">⚙️ ${r.name}</span>`).join('')}
+      </div>
+    </div>` : '';
+
+  const cardsHTML = choices.map((r, i) => `
+    <div class="relic-card rarity-${r.rarity ?? 'common'}" onclick="pickRelic(${i})">
+      <div class="relic-label">Relique</div>
+      <div class="relic-title">${r.name}</div>
+      <div class="relic-text">${r.description}</div>
+      <div style="margin-top:12px;font-size:11px;color:#888;text-align:center;">→ Équiper</div>
+    </div>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div style="padding:40px 20px;text-align:center;">
+      <h2 style="margin-bottom:8px;">⚙️ Une relique s'offre à toi</h2>
+      <p style="color:#aaa;font-size:13px;margin-bottom:24px;">
+        Une relique modifie structurellement ta run. Elle reste active jusqu'à la fin.
+      </p>
+      ${ownedHTML}
+      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:24px;">
+        ${cardsHTML}
+      </div>
+      <button class="btn" onclick="skipRelic()">Passer (ne rien prendre)</button>
+    </div>`;
+}
+
 function pickReward(index) {
   const card = G.rewardChoices[index];
   const allChoices = G.rewardChoices.map(c => `${c.name} [${c.rarity}]`).join(' | ');
@@ -1867,6 +2036,7 @@ function render() {
     case 'reward':  renderReward(); break;
     case 'identityChoice': renderIdentityChoice(); break;  // ← AJOUT
     case 'meta':    renderMeta();   break;
+    case 'relicChoice': renderRelicChoice(); break;
   }
 }
 
