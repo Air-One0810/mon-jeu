@@ -371,63 +371,76 @@ const REWARD_POOL = [
 // ============================================================
 const IDENTITY_POOL = [
 
-  // ─────────────────────────────────────────────────────────────────────
-  // 🔥 Cendres Persistantes
-  // Tes Feu n'infligent plus de dgt directs. Ils appliquent +3 Brûlure
-  // (5 stacks au total au lieu de 2). Tue Choc Thermique de facto.
-  // ─────────────────────────────────────────────────────────────────────
   {
     id: 'identity_cendres',
     name: 'Cendres Persistantes',
     elem: 'feu',
     description: 'Tes Feu n\'infligent plus de dgt directs, mais appliquent 5 Brûlure au lieu de 2. Ta Brûlure brûle 2 fois plus fort.',
     modifyElement: (el, target, ctx) => {
-      if(el.elem === 'feu') {
-        el.dmgOverride = 0;                            // Plus de dgt directs
-        el.bruleStacks = (el.bruleStacks ?? 2) + 3;    // +3 Brûlure (5 au total pour Feu de base)
+      if (el.elem === 'feu') {
+        el.dmgOverride = 0;
+        el.bruleStacks = (el.bruleStacks ?? 2) + 3;
       }
     },
+    // Affiche le comportement réel si l'élément est Feu
+    previewElement: (el, target, ctx) => {
+      if (el.elem === 'feu') return `(0 dgt + ${el.bruleStacks ?? 5} Brûlure)`;
+      return null;
+    },
+    // Cendres ne modifie pas le coût
+    previewCost: (currentCost, el, fo, ctx) => currentCost,
     flags: { bruleDoubleTick: true },
   },
 
-  // ─────────────────────────────────────────────────────────────────────
-  // ❄️ Étreinte Permanente
-  // Givré ne décrémente plus. Mais quand il est consumé (Choc Thermique
-  // ou Fracture), l'ennemi gagne +1 atk permanent.
-  // ─────────────────────────────────────────────────────────────────────
   {
     id: 'identity_etreinte',
     name: 'Étreinte Permanente',
     elem: 'glace',
     description: 'Givré ne s\'efface plus. Quand il est consumé : +1 atk à l\'ennemi, +1 Brûlure appliquée.',
+    // Étreinte ne modifie pas l'affichage de l'Élément,
+    // mais on signale visuellement le Givré permanent
+    previewElement: (el, target, ctx) => {
+      if (el.elem === 'glace') return `(Givré permanent)`;
+      return null;
+    },
+    previewCost: (currentCost, el, fo, ctx) => currentCost,
     flags: { noGivreDecay: true, givreConsumeBackfire: true },
   },
 
-  // ─────────────────────────────────────────────────────────────────────
-  // 🕳️ Implosion
-  // Vide ne fait plus piocher, ne consume plus la Brûlure.
-  // Vide inflige 2 + (nb d'États sur la cible) dgt.
-  // ─────────────────────────────────────────────────────────────────────
   {
     id: 'identity_implosion',
     name: 'Implosion',
     elem: 'vide',
     description: 'Vide ne fait plus piocher et ne détonne plus. Inflige 2 dgt + 1 par état présent, et pose Fragile.',
+    previewElement: (el, target, ctx) => {
+      if (el.elem !== 'vide') return null;
+      // Calcule les états sur la cible probable pour l'aperçu
+      let stateCount = 0;
+      if (target) {
+        if (target.givre > 0)   stateCount += 1;
+        if (target.brule > 0)   stateCount += target.brule;
+        if (target.fragile > 0) stateCount += 1;
+        if (target.stun)        stateCount += 1;
+      }
+      return `(Implosion : ${2 + stateCount} dgt)`;
+    },
+    previewCost: (currentCost, el, fo, ctx) => currentCost,
     flags: { implosionMode: true },
   },
 
-  // ─────────────────────────────────────────────────────────────────────
-  // 🔁 Écho
-  // La première carte jouée chaque tour déclenche son effet deux fois,
-  // sans coût supplémentaire de mana ou d'action.
-  // ─────────────────────────────────────────────────────────────────────
   {
     id: 'identity_echo',
     name: 'Écho',
     elem: 'meta',
     description: 'La 1ère carte ciblée que tu joues chaque tour déclenche son effet une seconde fois. (Ne fonctionne pas avec Zone.)',
+    // Écho ne modifie pas la description de l'effet
+    previewElement: (el, target, ctx) => null,
+    // Écho ajoute +1 mana si 1er assemblage éligible du tour
+    previewCost: (currentCost, el, fo, ctx) => {
+      const echoEligible = fo.forme !== 'zone' && !ctx.game.combat.echoUsedThisTurn;
+      return echoEligible ? currentCost + 1 : currentCost;
+    },
     flags: { echoMode: true },
-    // Logique dans assembleAction (Patch 5).
   },
 
 ];
@@ -991,162 +1004,105 @@ function applyElementEffect(el, target) {
   return dmg;
 }
 
-// ── assembleAction ─────────────────────────────────────────────────────────
-// Nouvelles mécaniques gérées :
-//   fo.freeAction    → l'assemblage ne consomme pas d'action
-//   fo.recycleSelf   → l'Élément retourne en main avec coût -1
-//   el.elan / fo.elan → +1 action +1 mana ce tour (mot-clé Élan)
-//   fo.formeDmg      → dgt bonus de la Forme sur la cible principale (Étincelle)
-//   el.recallFromDiscard → rappelle un Élément de type X de la défausse
-//   fo.drawCount     → pioche N cartes après l'assemblage (Stèle)
-// ──────────────────────────────────────────────────────────────────────────
-function assembleAction() {
-  const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
-  const el = sel.find(c=>c.type==='element');
-  const fo = sel.find(c=>c.type==='forme');
-  if(!el || !fo) { addLog('Sélectionne 1 Élément + 1 Forme.','warn'); render(); return; }
+function assemblyDescription() {
+  const t = selectionType();
 
-  if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
-    addLog(`${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.`, 'warn');
-    render(); return;
+  if (t === 'consumable') {
+    const card = G.combat.hand.find(c => c.id === G.selected[0]);
+    return `→ ${card.name} : ${card.effect}. Coût : ${card.cost} mana.`;
   }
 
-  const totalCost = el.cost + fo.cost;
-  if(totalCost > G.mana) { addLog(`Pas assez de mana (besoin ${totalCost}, dispo ${G.mana}).`,'bad'); render(); return; }
+  const sel = G.selected.map(id => G.combat.hand.find(c => c.id === id));
+  const el  = sel.find(c => c?.type === 'element');
+  const fo  = sel.find(c => c?.type === 'forme');
 
-  // freeAction : peut jouer même à 0 action
-  if(G.actionsLeft <= 0 && !fo.freeAction) {
-    addLog('Tu as déjà assemblé 2 fois ce tour.','warn'); render(); return;
+  if (!el && !fo) return 'Sélectionne 1 Élément + 1 Forme dans ta main.';
+  if (el && !fo)  return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
+  if (!el && fo)  return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
+
+  // Restriction d'assemblage
+  if (el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
+    return `<span style="color:#f5a383">⚠️ ${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.</span>`;
   }
 
-  const living = G.combat.enemies.filter(e=>e.hp>0);
-  if(living.length === 0) return;
+  // ── Coût — pipeline reducer ──────────────────────────────────────────
+  // Chaque source (Identity, puis Reliques plus tard) peut modifier
+  // le coût courant. Le renderer n'a aucune connaissance des règles.
+  let displayCost = el.cost + fo.cost;
+  const ctx = { game: G };
 
-  if(fo.forme === 'proj' && G.selectedTarget === null && living.length > 1) {
-    addLog('Choisis une cible pour cet assemblage.','warn'); render(); return;
+  if (G.run.identity?.previewCost) {
+    displayCost = G.run.identity.previewCost(displayCost, el, fo, ctx);
+  }
+  // Reliques — même pipeline, prêt pour session 2.b :
+  // for (const relic of G.run.relics ?? []) {
+  //   if (relic.previewCost) displayCost = relic.previewCost(displayCost, el, fo, ctx);
+  // }
+
+  const baseCost = el.cost + fo.cost;
+  const hasCostMod = displayCost !== baseCost;
+  const costSuffix = hasCostMod
+    ? ` <span style="color:#b29be0">(${displayCost > baseCost ? '+' : ''}${displayCost - baseCost} Écho)</span>`
+    : '';
+
+  // ── Description de l'effet — hook previewElement ─────────────────────
+  // On clone l'élément pour l'aperçu (safe, sans muter le template)
+  const elPreview = { ...el };
+  if (G.run.identity?.modifyElement) {
+    try { G.run.identity.modifyElement(elPreview, null, ctx); } catch(e) {}
   }
 
-  // Déduction des ressources
-  // Coût total (avec friction Écho sur le 1er assemblage du tour)
-  const echoActive = G.run.identity?.flags?.echoMode;
-  const echoEligible = echoActive && fo.forme !== 'zone';
-  const isFirstThisTurn = echoEligible && !G.combat.echoUsedThisTurn;
-  let actualCost = totalCost;
-  if(isFirstThisTurn) { actualCost += 1; }
-  if(actualCost > G.mana) {
-    addLog(`Pas assez de mana...`, 'bad');
-    render(); return;
-  }
-  G.mana -= actualCost;
-  if(!fo.freeAction) G.actionsLeft--;   // freeAction = action non consommée
-
-  // Retrait des cartes de la main
-  G.combat.hand = G.combat.hand.filter(c=>!G.selected.includes(c.id));
-
-  // ── Gestion de la destination de l'Élément ──
-  if(fo.recycleSelf) {
-    // Cycle des Éléments : l'Élément revient en main avec coût réduit
-    el.cost = Math.max(0, (el.cost || 0) - 1);
-    G.combat.hand.push(el);
-    G.combat.discard.push(fo);
-    addLog(`Cycle → ${el.name} retourne en main (coût : ${el.cost} mana).`, 'info');
-  } else {
-    G.combat.discard.push(el, fo);
+  // Suffixe déclaré par l'Identité elle-même — zéro couplage renderer
+  let elSuffix = '';
+  if (G.run.identity?.previewElement) {
+    // Cible probable pour le preview (Implosion a besoin des états)
+    const living = G.combat.enemies.filter(e => e.hp > 0);
+    const previewTarget = fo.forme === 'zone'
+      ? living[0]
+      : (G.selectedTarget !== null ? living[G.selectedTarget] : living[0]);
+    const suffix = G.run.identity.previewElement(elPreview, previewTarget, ctx);
+    if (suffix) elSuffix = ` <span style="color:#aaa">${suffix}</span>`;
   }
 
-  G.selected = [];
+  // ── Aperçus de combos ────────────────────────────────────────────────
+  let bonus = '';
+  if (fo.forme !== 'arm') {
+    const living = G.combat.enemies.filter(e => e.hp > 0);
+    const targets = fo.forme === 'zone'
+      ? living
+      : (living.length === 1 ? living
+         : G.selectedTarget !== null ? [living[G.selectedTarget]] : []);
 
-  // ── Résolution des effets ──
-  if(fo.forme === 'arm') {
-    const shieldAmount = fo.shieldAmount ?? 4;
-    G.shield += shieldAmount;
-    addLog(`${el.name} + ${fo.name} → +${shieldAmount} bouclier (total ${G.shield}).`, 'good');
-  }
-  else {
-    let targets;
-    if(fo.forme === 'zone') {
-      targets = living;
-      addLog(`${el.name} + Zone → frappe tous les ennemis :`, 'info');
-    } else {
-      let target;
-      if(living.length === 1) target = living[0];
-      else target = living[G.selectedTarget] || living[0];
-      targets = [target];
-    }
+    targets.forEach(tgt => {
+      if (!tgt) return;
+      if (el.elem === 'feu'   && tgt.givre > 0)
+        bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${tgt.name} (x2)</span> `;
+      if (el.elem === 'vide'  && tgt.brule > 0 && !G.run.identity?.flags?.implosionMode)
+        bonus += `<span class="assembly-bonus">⚡ Détonation sur ${tgt.name} (+${tgt.brule * 2} dgt)</span> `;
+      if (el.elem === 'glace' && tgt.fragile > 0)
+        bonus += `<span class="assembly-bonus">⚡ Fracture sur ${tgt.name} (stun)</span> `;
+      if (el.elem === 'vide'  && el.instantDetonate && tgt.brule > 0)
+        bonus += `<span class="assembly-bonus">⚡ Onde amplifie : +${tgt.brule * 2} dgt bonus</span> `;
+    });
 
-    // Effet principal de l'Élément sur chaque cible
-    targets.forEach(e => applyElementEffect(el, e));
-
-    // ── ÉCHO : si Identité Écho active et c'est le 1er assemblage du tour, on rejoue l'effet ──
-    const echoActive = G.run.identity?.flags?.echoMode;
-    const echoEligible = echoActive && fo.forme !== 'zone';  // ← Zone exclue
-    if(echoEligible && !G.combat.echoUsedThisTurn) {
-      G.combat.echoUsedThisTurn = true;
-      const stillLiving = targets.filter(e => e.hp > 0);
-      if(stillLiving.length > 0) {
-        addLog(`🔁 ÉCHO ! L'effet de ${el.name} + ${fo.name} se répète.`, 'combo');
-        stillLiving.forEach(e => applyElementEffect(el, e));
-      } else {
-        addLog(`🔁 Écho — cible(s) déjà éliminée(s), pas de répétition.`, 'info');
-      }
-    }
-
-    // Bonus de dgt de la Forme (Étincelle) → cible principale uniquement
-    if(fo.formeDmg) {
-      const primaryTarget = targets[0];
-      if(primaryTarget && primaryTarget.hp > 0) {
-        let bonusDmg = fo.formeDmg;
-        if(primaryTarget.enemyShield > 0) {
-          const absorbed = Math.min(primaryTarget.enemyShield, bonusDmg);
-          primaryTarget.enemyShield -= absorbed;
-          bonusDmg -= absorbed;
-          if(absorbed > 0) addLog(`${fo.name} : ${absorbed} dgt bonus absorbés par le bouclier.`, 'warn');
-        }
-        if(bonusDmg > 0) {
-          primaryTarget.hp = Math.max(0, primaryTarget.hp - bonusDmg);
-          addLog(`${fo.name} → ${bonusDmg} dgt bonus sur ${primaryTarget.name}.`, 'good');
-        }
-      }
-    }
-
-    // Pioche du Vide — désactivée par Implosion
-    const implosionMode = G.run.identity?.flags?.implosionMode;
-    if(el.elem === 'vide' && !el.instantDetonate && !implosionMode) {
-      const drawCount = el.drawCount ?? 1;
-      for(let i = 0; i < drawCount; i++) drawCard();
-      if(drawCount > 0) addLog(`Vide → tu pioches ${drawCount} carte(s).`, 'info');
-    }
-
-    // Pioche de la Forme (Stèle)
-    if(fo.drawCount) {
-      for(let i = 0; i < fo.drawCount; i++) drawCard();
-      addLog(`${fo.name} → tu pioches ${fo.drawCount} carte(s).`, 'info');
-    }
+    if (el.elem === 'cataclysme')
+      bonus += `<span class="assembly-bonus">🌋 Élan + combos ce tour +${el.comboBonus ?? 2} dgt</span> `;
   }
 
-  // ── Rappel de défausse (Mémoire des cendres) ──
-  // Se déclenche après que la carte est en défausse — exclut la carte jouée.
-  if(el.recallFromDiscard) {
-    const discardIdx = G.combat.discard.findIndex(
-      c => c.elem === el.recallFromDiscard && c.id !== el.id
-    );
-    if(discardIdx >= 0) {
-      const recalled = G.combat.discard.splice(discardIdx, 1)[0];
-      G.combat.hand.push(recalled);
-      addLog(`Mémoire des cendres → ${recalled.name} rappelé de la défausse.`, 'info');
-    }
-  }
+  // ── Indicateurs mécaniques ───────────────────────────────────────────
+  let mecaDesc = '';
+  if (fo.freeAction)  mecaDesc += ` <span style="color:#8bb8e8">Action gratuite.</span>`;
+  if (fo.recycleSelf) mecaDesc += ` <span style="color:#8bb8e8">Élément recyclé.</span>`;
+  if (fo.drawCount)   mecaDesc += ` <span style="color:#8bb8e8">Pioche ${fo.drawCount}.</span>`;
+  if (el.elan || fo.elan) mecaDesc += ` <span class="assembly-bonus">Élan.</span>`;
 
-  // ── Élan — traité en dernier, après tous les effets ──
-  if(el.elan || fo.elan) {
-    G.actionsLeft++;
-    G.mana++;
-    addLog('⚡ Élan ! +1 action et +1 mana pour ce tour.', 'info');
-  }
+  // ── Assemblage de la description finale ─────────────────────────────
+  let baseDesc = '';
+  if (fo.forme === 'arm')       baseDesc = `${el.name}${elSuffix} + ${fo.name} → +${fo.shieldAmount ?? 4} bouclier`;
+  else if (fo.forme === 'zone') baseDesc = `${el.name}${elSuffix} + Zone → frappe tous`;
+  else                          baseDesc = `${el.name}${elSuffix} + ${fo.name} → 1 cible`;
 
-  G.selectedTarget = null;
-  checkWin();
-  render();
+  return `${baseDesc}. Coût : ${displayCost} mana${costSuffix}${mecaDesc} ${bonus}`;
 }
 
 function drawCard() {
