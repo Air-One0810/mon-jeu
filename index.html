@@ -1004,105 +1004,162 @@ function applyElementEffect(el, target) {
   return dmg;
 }
 
-function assemblyDescription() {
-  const t = selectionType();
+// ── assembleAction ─────────────────────────────────────────────────────────
+// Nouvelles mécaniques gérées :
+//   fo.freeAction    → l'assemblage ne consomme pas d'action
+//   fo.recycleSelf   → l'Élément retourne en main avec coût -1
+//   el.elan / fo.elan → +1 action +1 mana ce tour (mot-clé Élan)
+//   fo.formeDmg      → dgt bonus de la Forme sur la cible principale (Étincelle)
+//   el.recallFromDiscard → rappelle un Élément de type X de la défausse
+//   fo.drawCount     → pioche N cartes après l'assemblage (Stèle)
+// ──────────────────────────────────────────────────────────────────────────
+function assembleAction() {
+  const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
+  const el = sel.find(c=>c.type==='element');
+  const fo = sel.find(c=>c.type==='forme');
+  if(!el || !fo) { addLog('Sélectionne 1 Élément + 1 Forme.','warn'); render(); return; }
 
-  if (t === 'consumable') {
-    const card = G.combat.hand.find(c => c.id === G.selected[0]);
-    return `→ ${card.name} : ${card.effect}. Coût : ${card.cost} mana.`;
+  if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
+    addLog(`${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.`, 'warn');
+    render(); return;
   }
 
-  const sel = G.selected.map(id => G.combat.hand.find(c => c.id === id));
-  const el  = sel.find(c => c?.type === 'element');
-  const fo  = sel.find(c => c?.type === 'forme');
+  const totalCost = el.cost + fo.cost;
+  if(totalCost > G.mana) { addLog(`Pas assez de mana (besoin ${totalCost}, dispo ${G.mana}).`,'bad'); render(); return; }
 
-  if (!el && !fo) return 'Sélectionne 1 Élément + 1 Forme dans ta main.';
-  if (el && !fo)  return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
-  if (!el && fo)  return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
-
-  // Restriction d'assemblage
-  if (el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
-    return `<span style="color:#f5a383">⚠️ ${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.</span>`;
+  // freeAction : peut jouer même à 0 action
+  if(G.actionsLeft <= 0 && !fo.freeAction) {
+    addLog('Tu as déjà assemblé 2 fois ce tour.','warn'); render(); return;
   }
 
-  // ── Coût — pipeline reducer ──────────────────────────────────────────
-  // Chaque source (Identity, puis Reliques plus tard) peut modifier
-  // le coût courant. Le renderer n'a aucune connaissance des règles.
-  let displayCost = el.cost + fo.cost;
-  const ctx = { game: G };
+  const living = G.combat.enemies.filter(e=>e.hp>0);
+  if(living.length === 0) return;
 
-  if (G.run.identity?.previewCost) {
-    displayCost = G.run.identity.previewCost(displayCost, el, fo, ctx);
-  }
-  // Reliques — même pipeline, prêt pour session 2.b :
-  // for (const relic of G.run.relics ?? []) {
-  //   if (relic.previewCost) displayCost = relic.previewCost(displayCost, el, fo, ctx);
-  // }
-
-  const baseCost = el.cost + fo.cost;
-  const hasCostMod = displayCost !== baseCost;
-  const costSuffix = hasCostMod
-    ? ` <span style="color:#b29be0">(${displayCost > baseCost ? '+' : ''}${displayCost - baseCost} Écho)</span>`
-    : '';
-
-  // ── Description de l'effet — hook previewElement ─────────────────────
-  // On clone l'élément pour l'aperçu (safe, sans muter le template)
-  const elPreview = { ...el };
-  if (G.run.identity?.modifyElement) {
-    try { G.run.identity.modifyElement(elPreview, null, ctx); } catch(e) {}
+  if(fo.forme === 'proj' && G.selectedTarget === null && living.length > 1) {
+    addLog('Choisis une cible pour cet assemblage.','warn'); render(); return;
   }
 
-  // Suffixe déclaré par l'Identité elle-même — zéro couplage renderer
-  let elSuffix = '';
-  if (G.run.identity?.previewElement) {
-    // Cible probable pour le preview (Implosion a besoin des états)
-    const living = G.combat.enemies.filter(e => e.hp > 0);
-    const previewTarget = fo.forme === 'zone'
-      ? living[0]
-      : (G.selectedTarget !== null ? living[G.selectedTarget] : living[0]);
-    const suffix = G.run.identity.previewElement(elPreview, previewTarget, ctx);
-    if (suffix) elSuffix = ` <span style="color:#aaa">${suffix}</span>`;
+  // Déduction des ressources
+  // Coût total (avec friction Écho sur le 1er assemblage du tour)
+  const echoActive = G.run.identity?.flags?.echoMode;
+  const echoEligible = echoActive && fo.forme !== 'zone';
+  const isFirstThisTurn = echoEligible && !G.combat.echoUsedThisTurn;
+  let actualCost = totalCost;
+  if(isFirstThisTurn) { actualCost += 1; }
+  if(actualCost > G.mana) {
+    addLog(`Pas assez de mana...`, 'bad');
+    render(); return;
+  }
+  G.mana -= actualCost;
+  if(!fo.freeAction) G.actionsLeft--;   // freeAction = action non consommée
+
+  // Retrait des cartes de la main
+  G.combat.hand = G.combat.hand.filter(c=>!G.selected.includes(c.id));
+
+  // ── Gestion de la destination de l'Élément ──
+  if(fo.recycleSelf) {
+    // Cycle des Éléments : l'Élément revient en main avec coût réduit
+    el.cost = Math.max(0, (el.cost || 0) - 1);
+    G.combat.hand.push(el);
+    G.combat.discard.push(fo);
+    addLog(`Cycle → ${el.name} retourne en main (coût : ${el.cost} mana).`, 'info');
+  } else {
+    G.combat.discard.push(el, fo);
   }
 
-  // ── Aperçus de combos ────────────────────────────────────────────────
-  let bonus = '';
-  if (fo.forme !== 'arm') {
-    const living = G.combat.enemies.filter(e => e.hp > 0);
-    const targets = fo.forme === 'zone'
-      ? living
-      : (living.length === 1 ? living
-         : G.selectedTarget !== null ? [living[G.selectedTarget]] : []);
+  G.selected = [];
 
-    targets.forEach(tgt => {
-      if (!tgt) return;
-      if (el.elem === 'feu'   && tgt.givre > 0)
-        bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${tgt.name} (x2)</span> `;
-      if (el.elem === 'vide'  && tgt.brule > 0 && !G.run.identity?.flags?.implosionMode)
-        bonus += `<span class="assembly-bonus">⚡ Détonation sur ${tgt.name} (+${tgt.brule * 2} dgt)</span> `;
-      if (el.elem === 'glace' && tgt.fragile > 0)
-        bonus += `<span class="assembly-bonus">⚡ Fracture sur ${tgt.name} (stun)</span> `;
-      if (el.elem === 'vide'  && el.instantDetonate && tgt.brule > 0)
-        bonus += `<span class="assembly-bonus">⚡ Onde amplifie : +${tgt.brule * 2} dgt bonus</span> `;
-    });
+  // ── Résolution des effets ──
+  if(fo.forme === 'arm') {
+    const shieldAmount = fo.shieldAmount ?? 4;
+    G.shield += shieldAmount;
+    addLog(`${el.name} + ${fo.name} → +${shieldAmount} bouclier (total ${G.shield}).`, 'good');
+  }
+  else {
+    let targets;
+    if(fo.forme === 'zone') {
+      targets = living;
+      addLog(`${el.name} + Zone → frappe tous les ennemis :`, 'info');
+    } else {
+      let target;
+      if(living.length === 1) target = living[0];
+      else target = living[G.selectedTarget] || living[0];
+      targets = [target];
+    }
 
-    if (el.elem === 'cataclysme')
-      bonus += `<span class="assembly-bonus">🌋 Élan + combos ce tour +${el.comboBonus ?? 2} dgt</span> `;
+    // Effet principal de l'Élément sur chaque cible
+    targets.forEach(e => applyElementEffect(el, e));
+
+    // ── ÉCHO : si Identité Écho active et c'est le 1er assemblage du tour, on rejoue l'effet ──
+    const echoActive = G.run.identity?.flags?.echoMode;
+    const echoEligible = echoActive && fo.forme !== 'zone';  // ← Zone exclue
+    if(echoEligible && !G.combat.echoUsedThisTurn) {
+      G.combat.echoUsedThisTurn = true;
+      const stillLiving = targets.filter(e => e.hp > 0);
+      if(stillLiving.length > 0) {
+        addLog(`🔁 ÉCHO ! L'effet de ${el.name} + ${fo.name} se répète.`, 'combo');
+        stillLiving.forEach(e => applyElementEffect(el, e));
+      } else {
+        addLog(`🔁 Écho — cible(s) déjà éliminée(s), pas de répétition.`, 'info');
+      }
+    }
+
+    // Bonus de dgt de la Forme (Étincelle) → cible principale uniquement
+    if(fo.formeDmg) {
+      const primaryTarget = targets[0];
+      if(primaryTarget && primaryTarget.hp > 0) {
+        let bonusDmg = fo.formeDmg;
+        if(primaryTarget.enemyShield > 0) {
+          const absorbed = Math.min(primaryTarget.enemyShield, bonusDmg);
+          primaryTarget.enemyShield -= absorbed;
+          bonusDmg -= absorbed;
+          if(absorbed > 0) addLog(`${fo.name} : ${absorbed} dgt bonus absorbés par le bouclier.`, 'warn');
+        }
+        if(bonusDmg > 0) {
+          primaryTarget.hp = Math.max(0, primaryTarget.hp - bonusDmg);
+          addLog(`${fo.name} → ${bonusDmg} dgt bonus sur ${primaryTarget.name}.`, 'good');
+        }
+      }
+    }
+
+    // Pioche du Vide — désactivée par Implosion
+    const implosionMode = G.run.identity?.flags?.implosionMode;
+    if(el.elem === 'vide' && !el.instantDetonate && !implosionMode) {
+      const drawCount = el.drawCount ?? 1;
+      for(let i = 0; i < drawCount; i++) drawCard();
+      if(drawCount > 0) addLog(`Vide → tu pioches ${drawCount} carte(s).`, 'info');
+    }
+
+    // Pioche de la Forme (Stèle)
+    if(fo.drawCount) {
+      for(let i = 0; i < fo.drawCount; i++) drawCard();
+      addLog(`${fo.name} → tu pioches ${fo.drawCount} carte(s).`, 'info');
+    }
   }
 
-  // ── Indicateurs mécaniques ───────────────────────────────────────────
-  let mecaDesc = '';
-  if (fo.freeAction)  mecaDesc += ` <span style="color:#8bb8e8">Action gratuite.</span>`;
-  if (fo.recycleSelf) mecaDesc += ` <span style="color:#8bb8e8">Élément recyclé.</span>`;
-  if (fo.drawCount)   mecaDesc += ` <span style="color:#8bb8e8">Pioche ${fo.drawCount}.</span>`;
-  if (el.elan || fo.elan) mecaDesc += ` <span class="assembly-bonus">Élan.</span>`;
+  // ── Rappel de défausse (Mémoire des cendres) ──
+  // Se déclenche après que la carte est en défausse — exclut la carte jouée.
+  if(el.recallFromDiscard) {
+    const discardIdx = G.combat.discard.findIndex(
+      c => c.elem === el.recallFromDiscard && c.id !== el.id
+    );
+    if(discardIdx >= 0) {
+      const recalled = G.combat.discard.splice(discardIdx, 1)[0];
+      G.combat.hand.push(recalled);
+      addLog(`Mémoire des cendres → ${recalled.name} rappelé de la défausse.`, 'info');
+    }
+  }
 
-  // ── Assemblage de la description finale ─────────────────────────────
-  let baseDesc = '';
-  if (fo.forme === 'arm')       baseDesc = `${el.name}${elSuffix} + ${fo.name} → +${fo.shieldAmount ?? 4} bouclier`;
-  else if (fo.forme === 'zone') baseDesc = `${el.name}${elSuffix} + Zone → frappe tous`;
-  else                          baseDesc = `${el.name}${elSuffix} + ${fo.name} → 1 cible`;
+  // ── Élan — traité en dernier, après tous les effets ──
+  if(el.elan || fo.elan) {
+    G.actionsLeft++;
+    G.mana++;
+    addLog('⚡ Élan ! +1 action et +1 mana pour ce tour.', 'info');
+  }
 
-  return `${baseDesc}. Coût : ${displayCost} mana${costSuffix}${mecaDesc} ${bonus}`;
+  G.selectedTarget = null;
+  checkWin();
+  render();
 }
 
 function drawCard() {
@@ -1363,89 +1420,102 @@ function canDiscard() {
 function assemblyDescription() {
   const t = selectionType();
 
-  if(t === 'consumable') {
+  if (t === 'consumable') {
     const card = G.combat.hand.find(c => c.id === G.selected[0]);
     return `→ ${card.name} : ${card.effect}. Coût : ${card.cost} mana.`;
   }
 
-  const sel = G.selected.map(id => G.combat.hand.find(c=>c.id===id));
-  const el = sel.find(c=>c?.type==='element');
-  const fo = sel.find(c=>c?.type==='forme');
-  if(!el && !fo) return 'Sélectionne 1 Élément + 1 Forme dans ta main.';
-  if(el && !fo)  return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
-  if(!el && fo)  return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
+  const sel = G.selected.map(id => G.combat.hand.find(c => c.id === id));
+  const el  = sel.find(c => c?.type === 'element');
+  const fo  = sel.find(c => c?.type === 'forme');
 
-  // ── Application des modifications d'Identité pour aperçu ──
-  // On clone temporairement pour ne pas muter le template
-  const elPreview = { ...el };
-  const foPreview = { ...fo };
-  if(G.run.identity?.modifyElement) {
-    try { G.run.identity.modifyElement(elPreview, null, { game: G }); } catch(e) {}
-  }
+  if (!el && !fo) return 'Sélectionne 1 Élément + 1 Forme dans ta main.';
+  if (el && !fo)  return `Élément choisi : ${el.name}. Sélectionne une Forme.`;
+  if (!el && fo)  return `Forme choisie : ${fo.name}. Sélectionne un Élément.`;
 
-  const baseCost = el.cost + fo.cost;
-  const echoActive = G.run.identity?.flags?.echoMode;
-  const isFirstThisTurn = echoActive && !G.combat.echoUsedThisTurn;
-  const cost = baseCost + (isFirstThisTurn ? 1 : 0);
-  const costSuffix = isFirstThisTurn ? ` <span style="color:#b29be0">(+1 friction Écho)</span>` : '';
-  let bonus = '';
-
-  // Aperçus de combos sur les cibles
-  if(fo.forme !== 'arm') {
-    const living = G.combat.enemies.filter(e=>e.hp>0);
-    const targets = fo.forme === 'zone' ? living :
-                    (living.length === 1 ? living :
-                     G.selectedTarget !== null ? [living[G.selectedTarget]] : []);
-    targets.forEach(tgt => {
-      if(!tgt) return;
-      if(el.elem === 'feu'        && tgt.givre > 0)   bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${tgt.name} (x2)</span> `;
-      if(el.elem === 'vide'       && tgt.brule > 0)   bonus += `<span class="assembly-bonus">⚡ Détonation sur ${tgt.name} (+${tgt.brule*2} dgt)</span> `;
-      if(el.elem === 'glace'      && tgt.fragile > 0) bonus += `<span class="assembly-bonus">⚡ Fracture sur ${tgt.name} (stun)</span> `;
-      if(el.elem === 'vide'       && el.instantDetonate && tgt.brule > 0)
-        bonus += `<span class="assembly-bonus">⚡ Onde amplifie : +${tgt.brule*2} dgt bonus</span> `;
-    });
-    if(el.elem === 'cataclysme')
-      bonus += `<span class="assembly-bonus">🌋 Élan + combos ce tour +${el.comboBonus ?? 2} dgt</span> `;
-  }
-
-  // Description adaptée à l'Identité
-  let elDesc = elPreview.name;
-  const id = G.run.identity;
-
-  if(id?.id === 'identity_cendres' && elPreview.elem === 'feu') {
-    elDesc += ` (0 dgt + ${elPreview.bruleStacks ?? 5} Brûlure)`;
-  } else if(id?.flags?.implosionMode && elPreview.elem === 'vide') {
-    let stateCount = 0;
-    const living = G.combat.enemies.filter(e=>e.hp>0);
-    const previewTarget = fo.forme === 'zone' ? living[0] :
-                          (G.selectedTarget !== null ? living[G.selectedTarget] : living[0]);
-    if(previewTarget) {
-      if(previewTarget.givre > 0)   stateCount += 1;
-      if(previewTarget.brule > 0)   stateCount += previewTarget.brule;
-      if(previewTarget.fragile > 0) stateCount += 1;
-      if(previewTarget.stun)        stateCount += 1;
-    }
-    elDesc += ` (Implosion : ${2 + stateCount} dgt)`;
-  } else if(id?.flags?.noGivreDecay && elPreview.elem === 'glace') {
-    elDesc += ` (Givré permanent)`;
-  }
-  // Description de la Forme
-  let baseDesc = '';
-  if(fo.forme === 'arm')       baseDesc = `${el.elDesc} + ${fo.name} → +${fo.shieldAmount ?? 4} bouclier`;
-  else if(fo.forme === 'zone') baseDesc = `${el.elDesc} + Zone → frappe tous`;
-  else                         baseDesc = `${el.elDesc} + ${fo.name} → 1 cible`;
-  if(el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
+  // Restriction d'assemblage
+  if (el.formeRestricted && !el.formeRestricted.includes(fo.forme)) {
     return `<span style="color:#f5a383">⚠️ ${el.name} ne peut être combiné qu'avec : ${el.formeRestricted.join(', ')}.</span>`;
   }
 
-  // Indicateurs mécaniques
-  let mecaDesc = '';
-  if(fo.freeAction)  mecaDesc += ` <span style="color:#8bb8e8">Action gratuite.</span>`;
-  if(fo.recycleSelf) mecaDesc += ` <span style="color:#8bb8e8">Élément recyclé.</span>`;
-  if(fo.drawCount)   mecaDesc += ` <span style="color:#8bb8e8">Pioche ${fo.drawCount}.</span>`;
-  if(el.elan || fo.elan) mecaDesc += ` <span class="assembly-bonus">Élan.</span>`;
+  // ── Coût — pipeline reducer ──────────────────────────────────────────
+  // Chaque source (Identity, puis Reliques plus tard) peut modifier
+  // le coût courant. Le renderer n'a aucune connaissance des règles.
+  let displayCost = el.cost + fo.cost;
+  const ctx = { game: G };
 
-  return `${baseDesc}. Coût : ${cost} mana${costSuffix}${mecaDesc} ${bonus}`;
+  if (G.run.identity?.previewCost) {
+    displayCost = G.run.identity.previewCost(displayCost, el, fo, ctx);
+  }
+  // Reliques — même pipeline, prêt pour session 2.b :
+  // for (const relic of G.run.relics ?? []) {
+  //   if (relic.previewCost) displayCost = relic.previewCost(displayCost, el, fo, ctx);
+  // }
+
+  const baseCost = el.cost + fo.cost;
+  const hasCostMod = displayCost !== baseCost;
+  const costSuffix = hasCostMod
+    ? ` <span style="color:#b29be0">(${displayCost > baseCost ? '+' : ''}${displayCost - baseCost} Écho)</span>`
+    : '';
+
+  // ── Description de l'effet — hook previewElement ─────────────────────
+  // On clone l'élément pour l'aperçu (safe, sans muter le template)
+  const elPreview = { ...el };
+  if (G.run.identity?.modifyElement) {
+    try { G.run.identity.modifyElement(elPreview, null, ctx); } catch(e) {}
+  }
+
+  // Suffixe déclaré par l'Identité elle-même — zéro couplage renderer
+  let elSuffix = '';
+  if (G.run.identity?.previewElement) {
+    // Cible probable pour le preview (Implosion a besoin des états)
+    const living = G.combat.enemies.filter(e => e.hp > 0);
+    const previewTarget = fo.forme === 'zone'
+      ? living[0]
+      : (G.selectedTarget !== null ? living[G.selectedTarget] : living[0]);
+    const suffix = G.run.identity.previewElement(elPreview, previewTarget, ctx);
+    if (suffix) elSuffix = ` <span style="color:#aaa">${suffix}</span>`;
+  }
+
+  // ── Aperçus de combos ────────────────────────────────────────────────
+  let bonus = '';
+  if (fo.forme !== 'arm') {
+    const living = G.combat.enemies.filter(e => e.hp > 0);
+    const targets = fo.forme === 'zone'
+      ? living
+      : (living.length === 1 ? living
+         : G.selectedTarget !== null ? [living[G.selectedTarget]] : []);
+
+    targets.forEach(tgt => {
+      if (!tgt) return;
+      if (el.elem === 'feu'   && tgt.givre > 0)
+        bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${tgt.name} (x2)</span> `;
+      if (el.elem === 'vide'  && tgt.brule > 0 && !G.run.identity?.flags?.implosionMode)
+        bonus += `<span class="assembly-bonus">⚡ Détonation sur ${tgt.name} (+${tgt.brule * 2} dgt)</span> `;
+      if (el.elem === 'glace' && tgt.fragile > 0)
+        bonus += `<span class="assembly-bonus">⚡ Fracture sur ${tgt.name} (stun)</span> `;
+      if (el.elem === 'vide'  && el.instantDetonate && tgt.brule > 0)
+        bonus += `<span class="assembly-bonus">⚡ Onde amplifie : +${tgt.brule * 2} dgt bonus</span> `;
+    });
+
+    if (el.elem === 'cataclysme')
+      bonus += `<span class="assembly-bonus">🌋 Élan + combos ce tour +${el.comboBonus ?? 2} dgt</span> `;
+  }
+
+  // ── Indicateurs mécaniques ───────────────────────────────────────────
+  let mecaDesc = '';
+  if (fo.freeAction)  mecaDesc += ` <span style="color:#8bb8e8">Action gratuite.</span>`;
+  if (fo.recycleSelf) mecaDesc += ` <span style="color:#8bb8e8">Élément recyclé.</span>`;
+  if (fo.drawCount)   mecaDesc += ` <span style="color:#8bb8e8">Pioche ${fo.drawCount}.</span>`;
+  if (el.elan || fo.elan) mecaDesc += ` <span class="assembly-bonus">Élan.</span>`;
+
+  // ── Assemblage de la description finale ─────────────────────────────
+  let baseDesc = '';
+  if (fo.forme === 'arm')       baseDesc = `${el.name}${elSuffix} + ${fo.name} → +${fo.shieldAmount ?? 4} bouclier`;
+  else if (fo.forme === 'zone') baseDesc = `${el.name}${elSuffix} + Zone → frappe tous`;
+  else                          baseDesc = `${el.name}${elSuffix} + ${fo.name} → 1 cible`;
+
+  return `${baseDesc}. Coût : ${displayCost} mana${costSuffix}${mecaDesc} ${bonus}`;
 }
 
 function needsTargetChoice() {
