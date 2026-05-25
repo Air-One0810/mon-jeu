@@ -466,7 +466,7 @@ const IDENTITY_POOL = [
     // Écho ajoute +1 mana si 1er assemblage éligible du tour
     previewCost: (currentCost, el, fo, ctx) => {
       const echoEligible = fo.forme !== 'zone' && !ctx.game.combat.echoUsedThisTurn;
-      return echoEligible ? currentCost + 1 : currentCost;
+      return echoEligible ? currentCost + 2 : currentCost;
     },
     flags: { echoMode: true },
   },
@@ -1049,11 +1049,12 @@ function applyElementEffect(el, target) {
       if(comboBonus) baseDmg += comboBonus;
       target.givre = 0;
       comboTriggered = true;
-      // ── ÉTREINTE PERMANENTE — backfire à la consommation ──
-      if(G.run.identity?.flags?.givreConsumeBackfire) {
+      // Étreinte backfire : uniquement si l'ennemi survit au Choc Thermique
+      // → punit la maladresse, pas le plan
+      const willSurvive = (target.hp - Math.max(0, baseDmg - target.enemyShield)) > 0;
+      if(G.run.identity?.flags?.givreConsumeBackfire && willSurvive) {
         target.atkBonus = (target.atkBonus || 0) + 1;
         addLog(`❄→⚠ Étreinte brisée : ${target.name} gagne +1 atk (total ${target.atk + target.atkBonus}).`, 'warn');
-        // ── NOUVEAU : engine Brûlure ──
         target.brule = (target.brule || 0) + 1;
         if(!target.appliedStates.includes('brule')) target.appliedStates.push('brule');
         addLog(`❄→🔥 La rupture du Givré laisse +1 Brûlure sur ${target.name}.`, 'good');
@@ -1256,7 +1257,7 @@ function assembleAction() {
   const echoEligible = echoActive && fo.forme !== 'zone';
   const isFirstThisTurn = echoEligible && !G.combat.echoUsedThisTurn;
   let actualCost = totalCost;
-  if(isFirstThisTurn) { actualCost += 1; }
+  if(isFirstThisTurn) { actualCost += 2; }
   if(actualCost > G.mana) {
     addLog(`Pas assez de mana...`, 'bad');
     render(); return;
@@ -2178,6 +2179,14 @@ window.giveFragments = (n) => { G.meta.fragments += n; saveMeta(); console.log(`
 window.showMeta      = () => console.log(JSON.parse(JSON.stringify(G.meta)));
 window.pickIdentity = pickIdentity;
 window.skipIdentity = skipIdentity;
+window.giveRelic = (id) => {
+  const r = RELIC_POOL.find(x => x.id === id);
+  if (r) { G.run.relics.push({ ...r, baseId: r.id }); render(); console.log(`+${r.name}`); }
+};
+window.giveIdentity = (id) => {
+  const i = IDENTITY_POOL.find(x => x.id === id);
+  if (i) { G.run.identity = { ...i, baseId: i.id }; render(); console.log(`Identité : ${i.name}`); }
+};
 
 if(DEV.startCombat > 0) {
   initRun();
