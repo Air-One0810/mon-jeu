@@ -227,6 +227,18 @@
       border-radius: 4px; padding: 2px 8px;
       color: #e8c97a; font-size: 11px; font-weight: 500;
     }
+    
+    /* ── Carte de choix de deck de départ ── */
+    .deck-card {
+      background: #252525;
+      border-radius: 12px;
+      padding: 20px;
+      width: 240px;
+      cursor: pointer;
+      text-align: left;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .deck-card:hover { transform: translateY(-4px); }
   </style>
 </head>
 <body>
@@ -295,6 +307,90 @@ const CARDS_DEF = [
   { id:'zon2',  type:'forme',   name:'Zone',       cost:3, effect:'Tous les ennemis',        forme:'zone' },
   { id:'arm1',  type:'forme',   name:'Armure',     cost:1, effect:'+4 bouclier',             forme:'arm' },
   { id:'arm2',  type:'forme',   name:'Armure',     cost:1, effect:'+4 bouclier',             forme:'arm' },
+];
+
+
+// ============================================================
+// DECKS DE DÉPART — 3 profils stratégiques
+// Chaque deck oriente naturellement vers une Identité.
+// Composition : toujours 12 cartes pour garantir l'équilibre
+// de la main de départ (4 cartes visibles / combat).
+// ============================================================
+
+const BRASIER_CARDS = [
+  // 3 Feu — pipeline Brûlure→Détonation hyper-fiable
+  { id:'b_feu1', type:'element', name:'Feu', cost:2, effect:'3 dgt + Brûlure (2)', elem:'feu' },
+  { id:'b_feu2', type:'element', name:'Feu', cost:2, effect:'3 dgt + Brûlure (2)', elem:'feu' },
+  { id:'b_feu3', type:'element', name:'Feu', cost:2, effect:'3 dgt + Brûlure (2)', elem:'feu' },
+  // 1 Glace — present mais rare, Choc Thermique = reward, pas routine
+  { id:'b_gla1', type:'element', name:'Glace', cost:2, effect:'1 dgt + Givré (1 tour)', elem:'glace' },
+  // 2 Vide — partenaire naturel du Feu
+  { id:'b_vid1', type:'element', name:'Vide', cost:2, effect:'2 dgt + Fragile + pioche', elem:'vide' },
+  { id:'b_vid2', type:'element', name:'Vide', cost:2, effect:'2 dgt + Fragile + pioche', elem:'vide' },
+  // 3 Projectile — ciblage précis pour Brûlure mono-cible
+  { id:'b_pro1', type:'forme', name:'Projectile', cost:1, effect:'1 ennemi ciblé', forme:'proj' },
+  { id:'b_pro2', type:'forme', name:'Projectile', cost:1, effect:'1 ennemi ciblé', forme:'proj' },
+  { id:'b_pro3', type:'forme', name:'Projectile', cost:1, effect:'1 ennemi ciblé', forme:'proj' },
+  // 1 Zone — présente mais rare, burst AoE occasionnel
+  { id:'b_zon1', type:'forme', name:'Zone', cost:3, effect:'Tous les ennemis', forme:'zone' },
+  // 2 Armure — défense standard
+  { id:'b_arm1', type:'forme', name:'Armure', cost:1, effect:'+4 bouclier', forme:'arm' },
+  { id:'b_arm2', type:'forme', name:'Armure', cost:1, effect:'+4 bouclier', forme:'arm' },
+];
+
+const PERMAFROST_CARDS = [
+  // 1 Feu — rare, valeur montée si Givré en place → Choc Thermique explosif
+  { id:'p_feu1', type:'element', name:'Feu', cost:2, effect:'3 dgt + Brûlure (2)', elem:'feu' },
+  // 3 Glace — pipeline Givré→Fracture→Stun dominant
+  { id:'p_gla1', type:'element', name:'Glace', cost:2, effect:'1 dgt + Givré (1 tour)', elem:'glace' },
+  { id:'p_gla2', type:'element', name:'Glace', cost:2, effect:'1 dgt + Givré (1 tour)', elem:'glace' },
+  { id:'p_gla3', type:'element', name:'Glace', cost:2, effect:'1 dgt + Givré (1 tour)', elem:'glace' },
+  // 2 Vide — pose Fragile pour fermer la boucle Glace→Fragile→Stun
+  { id:'p_vid1', type:'element', name:'Vide', cost:2, effect:'2 dgt + Fragile + pioche', elem:'vide' },
+  { id:'p_vid2', type:'element', name:'Vide', cost:2, effect:'2 dgt + Fragile + pioche', elem:'vide' },
+  // 2 Projectile — ciblage Glace précis
+  { id:'p_pro1', type:'forme', name:'Projectile', cost:1, effect:'1 ennemi ciblé', forme:'proj' },
+  { id:'p_pro2', type:'forme', name:'Projectile', cost:1, effect:'1 ennemi ciblé', forme:'proj' },
+  // 2 Zone — AoE Glace = Givré sur tous → setup multi-cibles puissant
+  { id:'p_zon1', type:'forme', name:'Zone', cost:3, effect:'Tous les ennemis', forme:'zone' },
+  { id:'p_zon2', type:'forme', name:'Zone', cost:3, effect:'Tous les ennemis', forme:'zone' },
+  // 2 Armure — défense standard
+  { id:'p_arm1', type:'forme', name:'Armure', cost:1, effect:'+4 bouclier', forme:'arm' },
+  { id:'p_arm2', type:'forme', name:'Armure', cost:1, effect:'+4 bouclier', forme:'arm' },
+];
+
+// Pool des decks de départ — référencé par renderDeckChoice()
+const STARTER_DECKS = [
+  {
+    id: 'arsenal',
+    name: 'Arsenal',
+    subtitle: 'Le Généraliste',
+    description: 'Accès immédiat aux 3 éléments et aux 3 synergies. Aucun axe forcé.',
+    hint: 'Idéal pour tester toutes les Identités. Liberté totale.',
+    accentColor: '#888',
+    composition: { feu:2, glace:2, vide:2, proj:2, zone:2, arm:2 },
+    cards: CARDS_DEF,
+  },
+  {
+    id: 'brasier',
+    name: 'Brasier',
+    subtitle: 'L\'Incendiaire',
+    description: '3 Feu, 1 Glace. Pipeline Brûlure→Détonation fiable dès le tour 1. Peu de contrôle.',
+    hint: 'Synergise avec : Cendres Persistantes, Embrasure, Mémoire des cendres.',
+    accentColor: '#D85A30',
+    composition: { feu:3, glace:1, vide:2, proj:3, zone:1, arm:2 },
+    cards: BRASIER_CARDS,
+  },
+  {
+    id: 'permafrost',
+    name: 'Permafrost',
+    subtitle: 'Le Contrôleur',
+    description: '3 Glace, 2 Zone. Pipeline Givré→Fracture dominant. Peu de burst direct.',
+    hint: 'Synergise avec : Étreinte Permanente, Brise-éclat, Glace mortelle.',
+    accentColor: '#378ADD',
+    composition: { feu:1, glace:3, vide:2, proj:2, zone:2, arm:2 },
+    cards: PERMAFROST_CARDS,
+  },
 ];
 
 // ============================================================
@@ -738,20 +834,20 @@ function initRun() {
     run: {
       playerHp: DEV.godMode ? 50 : 20,
       playerMaxHp: DEV.godMode ? 50 : 20,
-      deck: shuffle(CARDS_DEF.map(c => ({...c}))),
+      deck: [],           // ← vide : sera peuplé par pickStarterDeck()
       combatIndex: 0,
       combatList: [0, 1, 2, 3, 4, 5, 6],
       fragmentsEarned: 0,
       identity: null,
       relics: [],
+      startingDeckId: null,  // ← tracké pour 3.c
     },
-    scene: 'combat',
+    scene: 'deckChoice',
     log: [],
   };
-  // Header de run
   runLog(`═══ NOUVELLE RUN — ${new Date().toLocaleString('fr-FR')} ═══`);
-  runLog(`PV : ${G.run.playerHp}/${G.run.playerMaxHp}`);
-  initCombat(0);
+  // Pas d'initCombat ici — on attend le choix du deck
+  transitionTo('deckChoice');
 }
 
 function initCombat(index) {
@@ -1774,6 +1870,62 @@ function needsTargetChoice() {
   return G.combat.enemies.filter(e=>e.hp>0).length > 1;
 }
 
+// ── pickStarterDeck ──────────────────────────────────────────────────────────
+// Appelée par renderDeckChoice. Peuple G.run.deck et lance le premier combat.
+// G.run.deck est volontairement vide jusqu'ici (initRun ne le peuple plus).
+// ────────────────────────────────────────────────────────────────────────────
+function pickStarterDeck(index) {
+  const deck = STARTER_DECKS[index];
+  // Clone chaque carte pour isoler l'instance de run du template statique
+  G.run.deck = shuffle(deck.cards.map(c => ({...c})));
+  G.run.startingDeckId = deck.id;  // tracké pour les Trophées en 3.c
+  runLog(`PV : ${G.run.playerHp}/${G.run.playerMaxHp}`);
+  runLog(`Deck : ${deck.name} — ${deck.subtitle}`);
+  addLog(`Deck choisi : ${deck.name}.`, 'info');
+  initCombat(0);
+}
+
+// ── renderDeckChoice ─────────────────────────────────────────────────────────
+function renderDeckChoice() {
+  const decksHTML = STARTER_DECKS.map((d, i) => {
+    const c = d.composition;
+
+    // Pills de composition — couleur par type d'élément/forme
+    const pills = [
+      c.feu   && `<span style="background:#5a2010;color:#f5a383;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:500;">🔥 Feu ×${c.feu}</span>`,
+      c.glace && `<span style="background:#1e3a5f;color:#8bb8e8;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:500;">❄ Glace ×${c.glace}</span>`,
+      c.vide  && `<span style="background:#2c2845;color:#b29be0;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:500;">🕳 Vide ×${c.vide}</span>`,
+      c.proj  && `<span style="background:#2a2a2a;color:#aaa;border-radius:4px;padding:2px 7px;font-size:10px;">→ Proj ×${c.proj}</span>`,
+      c.zone  && `<span style="background:#2a2a2a;color:#aaa;border-radius:4px;padding:2px 7px;font-size:10px;">◎ Zone ×${c.zone}</span>`,
+      c.arm   && `<span style="background:#2a2a2a;color:#aaa;border-radius:4px;padding:2px 7px;font-size:10px;">🛡 Arm ×${c.arm}</span>`,
+    ].filter(Boolean).join('');
+
+    return `
+      <div class="deck-card" onclick="pickStarterDeck(${i})"
+           style="border:2px solid ${d.accentColor};box-shadow:0 0 16px ${d.accentColor}33;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;
+                    color:${d.accentColor};margin-bottom:6px;font-weight:500;">${d.subtitle}</div>
+        <div style="font-size:18px;font-weight:500;color:#fff;margin-bottom:10px;">${d.name}</div>
+        <div style="font-size:12px;color:#aaa;line-height:1.5;margin-bottom:10px;">${d.description}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div>
+        <div style="font-size:11px;color:#5dd4a3;line-height:1.4;">💡 ${d.hint}</div>
+        <div style="margin-top:16px;font-size:11px;color:#555;text-align:center;
+                    border-top:1px solid #333;padding-top:10px;">→ Choisir ce deck</div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div style="padding:40px 20px;text-align:center;">
+      <h2 style="font-size:22px;font-weight:500;margin-bottom:8px;">Choisir ton arsenal</h2>
+      <p style="color:#aaa;font-size:13px;margin-bottom:32px;">
+        Ton deck de départ définit ta stratégie naturelle. Il évoluera au fil des récompenses.
+      </p>
+      <div style="display:flex;gap:20px;justify-content:center;flex-wrap:wrap;">
+        ${decksHTML}
+      </div>
+    </div>`;
+}
+
 // ── renderMeta ──────────────────────────────────────────────────────────────
 function renderMeta() {
   const meta = G.meta;
@@ -2159,6 +2311,7 @@ function transitionTo(scene) {
 
 function render() {
   switch(G.scene) {
+    case 'deckChoice':     renderDeckChoice();
     case 'combat':  renderCombat(); break;
     case 'reward':  renderReward(); break;
     case 'identityChoice': renderIdentityChoice(); break;  // ← AJOUT
@@ -2190,6 +2343,9 @@ window.giveIdentity = (id) => {
 
 if(DEV.startCombat > 0) {
   initRun();
+  // En mode DEV, on bypass le choix de deck → Arsenal par défaut
+  G.run.deck = shuffle(CARDS_DEF.map(c => ({...c})));
+  G.run.startingDeckId = 'arsenal';
   G.run.combatIndex = DEV.startCombat;
   initCombat(DEV.startCombat);
 } else {
