@@ -755,22 +755,34 @@ function pickRarity() {
 function generateRewardChoices(count) {
   const choices = [];
   const usedIds = new Set();
+
+  // Guard : G.meta peut être absent lors d'appels précoces
+  const unlockedCards = G.meta?.unlockedCards ?? [];
   const availablePool = REWARD_POOL.filter(c =>
-    !c.locked || G.meta.unlockedCards.includes(c.id)
+    !c.locked || unlockedCards.includes(c.id)
   );
 
-  for(let i = 0; i < count; i++) {
+  // Guard : pool vide = retourne [] proprement, sans boucle infinie
+  if (availablePool.length === 0) return choices;
+
+  for (let i = 0; i < count; i++) {
     const rarity = pickRarity();
 
-    let candidates = availablePool.filter(c => c.rarity === rarity && !usedIds.has(c.id));
-    if(candidates.length === 0) {
+    let candidates = availablePool.filter(c =>
+      c.rarity === rarity && !usedIds.has(c.id)
+    );
+    // Fallback rareté : si la rareté tirée est épuisée, prend n'importe quoi
+    if (candidates.length === 0) {
       candidates = availablePool.filter(c => !usedIds.has(c.id));
-      if(candidates.length === 0) break;
     }
+    // Pool entier épuisé : on arrête proprement
+    if (candidates.length === 0) break;
+
     const card = candidates[Math.floor(Math.random() * candidates.length)];
     usedIds.add(card.id);
     choices.push({ ...card, id: `${card.id}_${Date.now()}_${i}` });
   }
+
   return choices;
 }
 
@@ -930,7 +942,7 @@ function onCombatVictory() {
 
   // Combat 2 (index 1) → Identité, puis récompense
   if (justFinishedIndex === 1 && IDENTITY_POOL.length > 0) {
-    G.identityChoices    = generateIdentityChoices(3);
+    G.identityChoices    = generateIdentityChoices();
     G.pendingRewardChoices = generateRewardChoices(3);
     transitionTo('identityChoice');
     return;
@@ -945,7 +957,7 @@ function onCombatVictory() {
   }
 
   // Autres combats → récompense directe
-  G.rewardChoices = generateRewardChoices();
+  G.rewardChoices = generateRewardChoices(3);
   transitionTo('reward');
 }
 
@@ -1145,7 +1157,11 @@ function applyElementEffect(el, target) {
     let comboTriggered = false;
 
     if(target.givre > 0) {
-      baseDmg *= 2;
+      // Choc Thermique : si Cendres a mis baseDmg à 0,
+      // on utilise le dgt standard de Feu (3) comme base du x2.
+      // Cendres sacrifie les dgt directs, pas le potentiel de réaction.
+      const ctBase = baseDmg > 0 ? baseDmg : 3;
+      baseDmg = ctBase * 2;
       if(comboBonus) baseDmg += comboBonus;
       target.givre = 0;
       comboTriggered = true;
