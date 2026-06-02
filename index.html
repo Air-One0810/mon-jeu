@@ -368,6 +368,7 @@ const STARTER_DECKS = [
     description: 'Accès immédiat aux 3 éléments et aux 3 synergies. Aucun axe forcé.',
     hint: 'Idéal pour tester toutes les Identités. Liberté totale.',
     accentColor: '#888',
+    excludeIdentities: [],
     composition: { feu:2, glace:2, vide:2, proj:2, zone:2, arm:2 },
     cards: CARDS_DEF,
   },
@@ -378,6 +379,7 @@ const STARTER_DECKS = [
     description: '3 Feu, 1 Glace. Pipeline Brûlure→Détonation fiable dès le tour 1. Peu de contrôle.',
     hint: 'Synergise avec : Cendres Persistantes, Embrasure, Mémoire des cendres.',
     accentColor: '#D85A30',
+    excludeIdentities: ['identity_cendres'],
     composition: { feu:3, glace:1, vide:2, proj:3, zone:1, arm:2 },
     cards: BRASIER_CARDS,
   },
@@ -388,6 +390,7 @@ const STARTER_DECKS = [
     description: '3 Glace, 2 Zone. Pipeline Givré→Fracture dominant. Peu de burst direct.',
     hint: 'Synergise avec : Étreinte Permanente, Brise-éclat, Glace mortelle.',
     accentColor: '#378ADD',
+    excludeIdentities: ['identity_etreinte'],
     composition: { feu:1, glace:3, vide:2, proj:2, zone:2, arm:2 },
     cards: PERMAFROST_CARDS,
   },
@@ -771,23 +774,24 @@ function generateRewardChoices(count) {
   return choices;
 }
 
-function generateIdentityChoices(count = 3) {
-  const choices = [];
-  const usedIds = new Set();
-  // Filtre : exclure l'Identité actuelle (pas de doublon dans le choix)
-  const currentId = G.run.identity?.baseId;
-  const available = IDENTITY_POOL.filter(c => c.id !== currentId);
+// ── generateIdentityChoices — PISTE B ─────────────────────────────────────────
+// Le deck de départ filtre les Identités proposées via excludeIdentities.
+//   - Deck thématique (Brasier/Permafrost) : exclut son Identité native
+//     → propose les 3 voies COMPLÉMENTAIRES (build hybride garanti).
+//   - Arsenal (excludeIdentities vide) : mode expert → propose TOUT le pool.
+// Zéro couplage : la règle vit dans la data du deck, pas dans le moteur.
+// ─────────────────────────────────────────────────────────────────────────────
+function generateIdentityChoices() {
+  const currentId   = G.run.identity?.baseId;          // exclut l'Identité actuelle (re-offre future)
+  const starterDeck = STARTER_DECKS.find(d => d.id === G.run.startingDeckId);
+  const excluded    = new Set(starterDeck?.excludeIdentities ?? []);
 
-  for(let i = 0; i < count; i++) {
-    const remaining = available.filter(c => !usedIds.has(c.id));
-    if(remaining.length === 0) break;
-    const card = remaining[Math.floor(Math.random() * remaining.length)];
-    usedIds.add(card.id);
-    // Pas de timestamp suffix : les Identités sont uniques par référence,
-    // pas instanciées comme les cartes deck.
-    choices.push({ ...card, baseId: card.id });
-  }
-  return choices;
+  // Toutes les Identités non-natives + non-actuelles, ordre mélangé pour la fraîcheur.
+  return shuffle(
+    IDENTITY_POOL
+      .filter(c => c.id !== currentId && !excluded.has(c.id))
+      .map(c => ({ ...c, baseId: c.id }))
+  );
 }
 
 function generateRelicChoices(count = 3) {
@@ -941,7 +945,7 @@ function onCombatVictory() {
   }
 
   // Autres combats → récompense directe
-  G.rewardChoices = generateRewardChoices(3);
+  G.rewardChoices = generateRewardChoices();
   transitionTo('reward');
 }
 
@@ -1176,7 +1180,11 @@ function applyElementEffect(el, target) {
   // ── GLACE ──
   else if(el.elem === 'glace') {
     dmg = 1;
-
+    // ── CLOSER PERMAFROST — Glace frappe +1 sur une cible déjà Givrée ──────────
+    // Rend le re-gel pertinent : en Zone, chaque ennemi gelé encaisse +1.
+    // Permafrost spamme Glace+Zone → pression AoE croissante = son closer.
+    // Universel (pas conditionné au deck) → zéro couplage deck/combat.
+    if(target.givre > 0) dmg += 1;
     if(el.forceStun) {
       // Brise-éclat : stun garanti, pas de Givré
       target.stun = true;
@@ -2209,6 +2217,13 @@ function renderIdentityChoice() {
   const choices = G.identityChoices;
   const current = G.run.identity;
 
+  // Intro adaptée au deck (Piste B) — explique POURQUOI le pool est filtré
+  const starterDeck = STARTER_DECKS.find(d => d.id === G.run.startingDeckId);
+  const isExpert    = (starterDeck?.excludeIdentities ?? []).length === 0;
+  const introText   = isExpert
+    ? `Ton arsenal est polyvalent — <b>toutes les voies</b> te sont ouvertes.`
+    : `Ton deck <b>${starterDeck?.name}</b> incarne déjà sa voie élémentaire. Choisis une voie <b>complémentaire</b> pour façonner un build hybride.`;
+
   const currentHTML = current ? `
     <div style="background:#2a2a2a;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
       <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Identité actuelle</div>
@@ -2231,7 +2246,7 @@ function renderIdentityChoice() {
   document.getElementById('app').innerHTML = `
     <div style="padding:40px 20px;text-align:center;">
       <h2 style="margin-bottom:8px;">Une identité s'éveille</h2>
-      <p style="color:#aaa;font-size:13px;margin-bottom:24px;">Une identité transforme la façon dont tu joues un élément. Elle reste active toute la run.</p>
+      <p style="color:#aaa;font-size:13px;margin-bottom:24px;">${introText}</p>
       ${currentHTML}
       <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:24px;">
         ${cardsHTML}
