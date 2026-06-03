@@ -238,6 +238,15 @@
       text-align: left;
       transition: transform 0.15s, border-color 0.15s;
     }
+
+    /* ── Carte signature (écran de choix) ── */
+    .signature-card {
+      background: #252525; border-radius: 12px; padding: 20px;
+      width: 240px; cursor: pointer; text-align: left;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .signature-card:hover { transform: translateY(-4px); }
+
     .deck-card:hover { transform: translateY(-4px); }
   </style>
 </head>
@@ -678,6 +687,34 @@ const RELIC_POOL = [
 
 ];
 
+// ============================================================
+// SIGNATURES — pool séparé. Lien deck↔carte via deckId.
+// Livraison : récompense GARANTIE après Combat 1 (Mécanisme B).
+// ⚠️ STUBS : ces 2 cartes réutilisent des mécaniques existantes
+//    (Feu / Glace) pour valider le FLUX. Le design réel de Fournaise
+//    et Zéro Absolu (mécaniques inédites + équilibrage DE) = session 3.b.2.
+// Arsenal : AUCUNE entrée → son identité est l'absence de signature.
+// ============================================================
+const SIGNATURE_POOL = [
+  {
+    id:'sig_brasier', deckId:'brasier',
+    type:'element', name:'Fournaise', cost:3,
+    effect:'[STUB] 4 dgt + Brûlure (3). Win condition Feu — à redesigner.',
+    elem:'feu', rarity:'epic', dmgOverride:4, bruleStacks:3,
+  },
+  {
+    id:'sig_permafrost', deckId:'permafrost',
+    type:'element', name:'Zéro Absolu', cost:3,
+    effect:'[STUB] 2 dgt + Givré (2) + Fragile (2). Closer Glace — à redesigner.',
+    elem:'glace', rarity:'epic', givreDuration:2, applyFragile:true, fragileDuration:2,
+  },
+];
+
+// Retourne la signature d'un deck, ou null (Arsenal → null).
+function getDeckSignature(deckId) {
+  return SIGNATURE_POOL.find(s => s.deckId === deckId) ?? null;
+}
+
 const ENCOUNTERS = [
   {
     name:'Combat 1 — La Goule',
@@ -940,6 +977,19 @@ function onCombatVictory() {
   // Le choix d'Identité a lieu AVANT la récompense standard.
   const justFinishedIndex = G.run.combatIndex;
 
+  // Combat 1 (index 0) → Signature garantie SI le deck en a une.
+  // Arsenal (getDeckSignature = null) : tombe vers la récompense normale.
+  if (justFinishedIndex === 0) {
+    const sig = getDeckSignature(G.run.startingDeckId);
+    if (sig) {
+      G.signatureChoice      = sig;
+      G.pendingRewardChoices = generateRewardChoices(3);
+      transitionTo('signatureChoice');
+      return;
+    }
+    // pas de signature → on ne return PAS, on continue vers le reward final
+  }
+
   // Combat 2 (index 1) → Identité, puis récompense
   if (justFinishedIndex === 1 && IDENTITY_POOL.length > 0) {
     G.identityChoices    = generateIdentityChoices();
@@ -1006,6 +1056,31 @@ function skipRelic() {
 
 function proceedAfterRelic() {
   G.relicChoices = null;
+  G.rewardChoices = G.pendingRewardChoices;
+  G.pendingRewardChoices = null;
+  transitionTo('reward');
+}
+
+// ── Choix de Signature (après Combat 1) ──────────────────────────────────────
+function pickSignature() {
+  const sig = G.signatureChoice;
+  if (sig) {
+    // Instance unique (comme les récompenses) pour éviter les collisions d'id
+    const instance = { ...sig, id: `${sig.id}_${Date.now()}` };
+    G.run.deck.push(instance);
+    runLog(`\n── Signature — Acquise : ${sig.name} [${sig.rarity}]`);
+    addLog(`Carte signature acquise : ${sig.name}.`, 'good');
+  }
+  proceedAfterSignature();
+}
+
+function skipSignature() {
+  runLog(`\n── Signature — Proposée : ${G.signatureChoice?.name} — PASSÉE`);
+  proceedAfterSignature();
+}
+
+function proceedAfterSignature() {
+  G.signatureChoice = null;
   G.rewardChoices = G.pendingRewardChoices;
   G.pendingRewardChoices = null;
   transitionTo('reward');
@@ -2207,6 +2282,31 @@ function renderCombat() {
     </div>`;
 }
 
+function renderSignatureChoice() {
+  const sig    = G.signatureChoice;
+  const deck   = STARTER_DECKS.find(d => d.id === sig.deckId);
+  const accent = deck?.accentColor ?? '#e8c97a';
+
+  document.getElementById('app').innerHTML = `
+    <div style="padding:40px 20px;text-align:center;">
+      <h2 style="margin-bottom:8px;">⚜️ Ta carte signature</h2>
+      <p style="color:#aaa;font-size:13px;margin-bottom:24px;">
+        Exclusive au deck <b>${deck?.name}</b> — elle incarne ta win condition. Aucun autre deck ne la verra.
+      </p>
+      <div style="display:flex;justify-content:center;margin-bottom:24px;">
+        <div class="signature-card" onclick="pickSignature()"
+             style="border:2px solid ${accent};box-shadow:0 0 20px ${accent}55;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:${accent};margin-bottom:8px;font-weight:500;">Signature — ${deck?.name}</div>
+          <div style="font-size:17px;font-weight:500;color:#fff;margin-bottom:6px;">${sig.name}</div>
+          <div style="font-size:12px;color:#aaa;margin-bottom:8px;">${sig.cost} mana</div>
+          <div style="font-size:12px;color:#aaa;line-height:1.5;">${sig.effect}</div>
+          <div style="margin-top:16px;font-size:11px;color:#555;border-top:1px solid #333;padding-top:10px;">→ Ajouter à ton deck</div>
+        </div>
+      </div>
+      <button class="btn" onclick="skipSignature()">Passer (ne pas prendre)</button>
+    </div>`;
+}
+
 // ── renderReward ────────────────────────────────────────────────────────────
 function renderReward() {
   const cardsHTML = G.rewardChoices.map((c, i) => {
@@ -2344,6 +2444,7 @@ function render() {
   switch(G.scene) {
     case 'deckChoice':     renderDeckChoice();
     case 'combat':  renderCombat(); break;
+    case 'signatureChoice': renderSignatureChoice(); break;
     case 'reward':  renderReward(); break;
     case 'identityChoice': renderIdentityChoice(); break;  // ← AJOUT
     case 'meta':    renderMeta();   break;
