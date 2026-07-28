@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Tests — mon-jeu</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a1a; color: #e8e8e8; padding: 24px; max-width: 900px; margin: 0 auto;
+  }
+  h1 { font-size: 20px; font-weight: 500; margin-bottom: 4px; }
+  .subtitle { font-size: 12px; color: #888; margin-bottom: 20px; }
+  .summary {
+    background: #2a2a2a; border-radius: 8px; padding: 12px 16px;
+    margin-bottom: 16px; font-size: 14px; font-weight: 500;
+  }
+  .summary.all-pass { color: #5dd4a3; }
+  .summary.has-fail { color: #f5a383; }
+  .row {
+    font-size: 13px; padding: 6px 10px; border-radius: 6px; margin-bottom: 2px;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .row.pass { color: #5dd4a3; }
+  .row.fail { background: #3a1f1a; color: #f5a383; }
+  .row .err { display: block; color: #e8c97a; margin-top: 2px; padding-left: 20px; }
+  .group { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #888; margin: 18px 0 6px; }
+</style>
+</head>
+<body>
+<h1>Tests — logique de jeu</h1>
+<div class="subtitle">Charge game-logic.js directement (aucune dépendance, aucun build). Ouvrir ce fichier dans un navigateur pour lancer.</div>
+<div id="results"></div>
+
+<script src="game-logic.js"></script>
+<script>
+// ============================================================
+// HARNAIS DE TEST — ~30 lignes, zéro dépendance.
+// Cohérent avec la doctrine "pas de framework, pas de build tool".
+// ============================================================
+const results = [];
+let currentGroup = '';
+
+function group(name) { currentGroup = name; }
+
+function test(name, fn) {
+  try {
+    fn();
+    results.push({ group: currentGroup, name, ok: true });
+  } catch (e) {
+    results.push({ group: currentGroup, name, ok: false, err: e.message });
+  }
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`${label ?? 'valeur'} : attendu ${JSON.stringify(expected)}, obtenu ${JSON.stringify(actual)}`);
+  }
+}
+
+function assertTrue(cond, label) {
+  if (!cond) throw new Error(label ?? 'condition attendue vraie, obtenue fausse');
+}
+
+function assertIncludes(arr, val, label) {
+  if (!arr.includes(val)) throw new Error(`${label ?? 'tableau'} : devrait contenir ${JSON.stringify(val)}, contient ${JSON.stringify(arr)}`);
+}
+
+function assertNotIncludes(arr, val, label) {
+  if (arr.includes(val)) throw new Error(`${label ?? 'tableau'} : ne devrait PAS contenir ${JSON.stringify(val)}, contient ${JSON.stringify(arr)}`);
+}
+
+// ── Fixture : construit un G minimal fidèle à ce que produit initCombat() ──
+// enemyDefs : tableau d'objets bruts (passés à newEnemy).
+// opts      : { identity, relics, mana, maxMana, actionsLeft, shield,
+//               playerHp, hand, deck, discard, comboBonusTurn }
+function makeCombat(enemyDefs, opts = {}) {
+  G = {
+    meta: { fragments: 0, unlockedCards: [], totalRunsWon: 0, totalRunsLost: 0 },
+    run: {
+      playerHp: opts.playerHp ?? 20, playerMaxHp: 20,
+      deck: [], combatIndex: 0, combatList: [0],
+      fragmentsEarned: 0,
+      identity: opts.identity ?? null,
+      relics: opts.relics ?? [],
+      startingDeckId: 'arsenal',
+      runLog: [],
+    },
+    scene: 'combat',
+    log: [],
+    encName: 'Test',
+    playerHp: opts.playerHp ?? 20,
+    playerMaxHp: 20,
+    shield: opts.shield ?? 0,
+    mana: opts.mana ?? 6,
+    maxMana: opts.maxMana ?? 6,
+    actionsLeft: opts.actionsLeft ?? 2,
+    selected: [],
+    selectedTarget: null,
+    combat: {
+      enemies: enemyDefs.map(newEnemy),
+      deck: opts.deck ?? [],
+      hand: opts.hand ?? [],
+      discard: opts.discard ?? [],
+      comboBonusTurn: opts.comboBonusTurn ?? 0,
+      comboBonusTurnsLeft: opts.comboBonusTurnsLeft ?? 0,
+      echoUsedThisTurn: opts.echoUsedThisTurn ?? false,
+      lastElementPlayed: opts.lastElementPlayed ?? null,
+    },
+  };
+  return G;
+}
+
+// Joue un Élément + une Forme comme le ferait un joueur (sélection puis assembleAction).
+function playCombo(elCard, foCard, targetIdx = null) {
+  G.combat.hand = [elCard, foCard, ...G.combat.hand.filter(c => c.id !== elCard.id && c.id !== foCard.id)];
+  G.selected = [elCard.id, foCard.id];
+  G.selectedTarget = targetIdx;
+  assembleAction();
+}
+
+// requestRender reste le no-op par défaut de game-logic.js — aucun DOM ici, pas besoin d'y toucher.
+
+
+// ============================================================
+// COMBOS ÉLÉMENTAIRES — applyElementEffect
+// ============================================================
+group('Combos élémentaires');
+
+test('Feu sans Givré : 3 dgt + 2 Brûlure', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'feu', cost:2 }, t);
+  assertEqual(t.hp, 17, 'hp');
+  assertEqual(t.brule, 2, 'brule');
+});
+
+test('Choc Thermique : Feu sur Givré double les dégâts et consomme le Givré', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  t.givre = 2;
+  applyElementEffect({ elem:'feu', cost:2 }, t);
+  assertEqual(t.hp, 14, 'hp (6 dgt = 3x2)');
+  assertEqual(t.givre, 0, 'givre consommé');
+  assertEqual(t.brule, 2, 'brule quand même appliquée');
+});
+
+test('Glace sur cible neutre : 1 dgt + Givré (2 tours)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'glace', cost:2 }, t);
+  assertEqual(t.hp, 19, 'hp');
+  assertEqual(t.givre, 2, 'givre');
+});
+
+test('Closer Permafrost : Glace sur cible déjà Givrée inflige +1 dgt', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  t.givre = 2;
+  applyElementEffect({ elem:'glace', cost:2 }, t);
+  assertEqual(t.hp, 18, 'hp (1 base +1 bonus)');
+});
+
+test('Fracture : Glace sur Fragile stun garanti (et ré-applique du Givré)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  t.fragile = 1;
+  applyElementEffect({ elem:'glace', cost:2 }, t);
+  assertEqual(t.hp, 19, 'hp');
+  assertEqual(t.stun, true, 'stun');
+  assertEqual(t.fragile, 0, 'fragile consommé');
+  assertEqual(t.givre, 2, 'Givré ré-appliqué en side-effect (comportement réel, pas un bug)');
+});
+
+test('Brise-éclat (forceStun) : stun garanti sans consommer de Givré', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'glace', cost:3, forceStun:true, fragileDuration:1 }, t);
+  assertEqual(t.hp, 19, 'hp');
+  assertEqual(t.stun, true, 'stun');
+  assertEqual(t.fragile, 1, 'fragile posé');
+  assertEqual(t.givre, 0, 'pas de Givré (forceStun court-circuite)');
+});
+
+test('Vide sans Brûlure : 2 dgt + Fragile', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'vide', cost:2 }, t);
+  assertEqual(t.hp, 18, 'hp');
+  assertEqual(t.fragile, 1, 'fragile');
+});
+
+test('Détonation : Vide consume la Brûlure (+2 dgt/stack)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'brule', 3);
+  applyElementEffect({ elem:'vide', cost:2 }, t);
+  assertEqual(t.hp, 12, 'hp (2 base + 3x2 détonation = 8)');
+  assertEqual(t.brule, 0, 'brule consommée');
+});
+
+test('Cataclysme : pose les 3 états, zéro dégât direct, arme le bonus combo', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'cataclysme', cost:5 }, t);
+  assertEqual(t.hp, 20, 'hp inchangé');
+  assertEqual(t.brule, 3, 'brule');
+  assertEqual(t.givre, 2, 'givre');
+  assertEqual(t.fragile, 2, 'fragile');
+  assertEqual(G.combat.comboBonusTurn, 2, 'bonus combo armé');
+});
+
+test('Bouclier ennemi absorbe les dégâts directs mais pas la pose de Brûlure', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0, startShield:5 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'feu', cost:2 }, t);
+  assertEqual(t.hp, 20, 'hp intact (3 dgt < 5 bouclier)');
+  assertEqual(t.enemyShield, 2, 'bouclier réduit de 3');
+  assertEqual(t.brule, 2, 'Brûlure quand même posée');
+});
+
+
+// ============================================================
+// ASSEMBLAGE — assembleAction
+// ============================================================
+group('Assemblage (assembleAction)');
+
+test('Coût total déduit du mana, 1 action consommée', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { mana:6, actionsLeft:2 });
+  playCombo(
+    { id:'e1', type:'element', cost:2, elem:'feu' },
+    { id:'f1', type:'forme', cost:1, forme:'proj' }
+  );
+  assertEqual(G.mana, 3, 'mana');
+  assertEqual(G.actionsLeft, 1, 'actions');
+});
+
+test('freeAction ne consomme pas d\'action (jouable à 0 action restante)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { mana:6, actionsLeft:0 });
+  playCombo(
+    { id:'e2', type:'element', cost:2, elem:'feu' },
+    { id:'f2', type:'forme', cost:1, forme:'proj', freeAction:true }
+  );
+  assertEqual(G.actionsLeft, 0, 'actions inchangées');
+  assertEqual(G.mana, 3, 'mana quand même déduit');
+});
+
+test('formeRestricted refuse une Forme non autorisée (aucune ressource dépensée)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { mana:6, actionsLeft:2 });
+  playCombo(
+    { id:'e3', type:'element', cost:3, elem:'glace', forceStun:true, formeRestricted:['proj'] },
+    { id:'f3', type:'forme', cost:3, forme:'zone' }
+  );
+  assertEqual(G.mana, 6, 'mana non dépensé');
+  assertEqual(G.actionsLeft, 2, 'action non dépensée');
+  assertEqual(G.log[0].type, 'warn', 'message d\'avertissement loggé');
+});
+
+test('recycleSelf (Cycle des Éléments) : l\'Élément revient en main, coût -1', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { mana:6, actionsLeft:2 });
+  playCombo(
+    { id:'e4', type:'element', cost:2, elem:'feu' },
+    { id:'f4', type:'forme', cost:3, forme:'proj', recycleSelf:true }
+  );
+  const recycled = G.combat.hand.find(c => c.id === 'e4');
+  assertTrue(!!recycled, 'carte recyclée présente en main');
+  assertEqual(recycled.cost, 1, 'coût réduit de 1');
+  assertTrue(G.combat.discard.some(c => c.id === 'f4'), 'la Forme part en défausse');
+  assertEqual(G.mana, 1, 'mana (coût original 5, pas le coût réduit)');
+});
+
+test('Élan : +1 action et +1 mana après résolution', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { mana:6, actionsLeft:2 });
+  playCombo(
+    { id:'e5', type:'element', cost:2, elem:'feu' },
+    { id:'f5', type:'forme', cost:1, forme:'proj', formeDmg:2, elan:true }
+  );
+  assertEqual(G.mana, 4, 'mana (6 -3 +1)');
+  assertEqual(G.actionsLeft, 2, 'actions (2 -1 +1)');
+});
+
+
+// ============================================================
+// FIN DE TOUR — endTurn
+// ============================================================
+group('Fin de tour (endTurn)');
+
+test('Brûlure tick 1 dgt/tour par défaut', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'brule', 3);
+  endTurn();
+  assertEqual(t.hp, 19, 'hp');
+  assertEqual(t.brule, 2, 'brule décrémentée');
+});
+
+test('bruleDoubleTick (Cendres Persistantes) : 2 dgt/tour', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { identity: { elem:'feu', flags:{ bruleDoubleTick:true } } });
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'brule', 3);
+  endTurn();
+  assertEqual(t.hp, 18, 'hp (tick doublé)');
+});
+
+test('Stun : l\'ennemi rate son tour et son attaque chargée est annulée', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:5 }], { playerHp: 20 });
+  const t = G.combat.enemies[0];
+  t.stun = true;
+  t.intent = { type:'charged', damage:6 };
+  endTurn();
+  assertEqual(G.playerHp, 20, 'joueur non touché');
+  assertEqual(t.stun, false, 'stun consommé');
+  assertEqual(t.intent, null, 'attaque chargée annulée');
+});
+
+test('Archétype tank : régénère son bouclier en fin de tour', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0, archetype:'tank', startShield:3, shieldRegen:2 }]);
+  const t = G.combat.enemies[0];
+  endTurn();
+  assertEqual(t.enemyShield, 5, 'bouclier régénéré');
+});
+
+test('Archétype charged : charge sur 2 tours puis inflige l\'attaque lourde au 3e', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0, archetype:'charged', chargedDamage:6, chargedInterval:2 }], { playerHp: 20 });
+  endTurn(); // tour 1 : compteur 0→1
+  endTurn(); // tour 2 : compteur 1→2, intent armé (déclenche au tour suivant)
+  assertEqual(G.playerHp, 20, 'pas encore de dégâts (intent armé pour le tour d\'après)');
+  endTurn(); // tour 3 : l'attaque chargée s'exécute
+  assertEqual(G.playerHp, 14, 'attaque chargée de 6 dgt infligée');
+});
+
+
+// ============================================================
+// CAS LIMITES — doctrine architecture-code.md
+// ============================================================
+group('Cas limites');
+
+test('Pioche et défausse vides : drawToFull s\'arrête proprement (pas de boucle infinie)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { hand:[], deck:[], discard:[] });
+  drawToFull();
+  assertEqual(G.combat.hand.length, 0, 'main vide, aucun crash');
+});
+
+test('Pioche vide mais défausse non vide : reshuffle automatique', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], {
+    hand: [], deck: [],
+    discard: [{ id:'d1' }, { id:'d2' }, { id:'d3' }],
+  });
+  drawToFull();
+  assertEqual(G.combat.hand.length, 3, 'les 3 cartes de la défausse rejoignent la main');
+  assertEqual(G.combat.deck.length, 0, 'pioche vidée');
+  assertEqual(G.combat.discard.length, 0, 'défausse vidée par le reshuffle');
+});
+
+test('Cible tuée en cours de résolution : hp clampé à 0, jamais négatif', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:5, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'brule', 10);
+  applyElementEffect({ elem:'vide', cost:2 }, t); // 2 + 10*2 = 22 dgt sur une cible à 5 hp
+  assertEqual(t.hp, 0, 'hp clampé à 0, pas -17');
+});
+
+test('Mana insuffisant : assembleAction refuse proprement, mana jamais négatif', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], { mana:1, actionsLeft:2 });
+  playCombo(
+    { id:'e6', type:'element', cost:2, elem:'feu' },
+    { id:'f6', type:'forme', cost:1, forme:'proj' }
+  );
+  assertEqual(G.mana, 1, 'mana inchangé, jamais négatif');
+});
+
+
+// ============================================================
+// RÉGRESSIONS — bugs corrigés session 2026-07-27 (cf. CONTEXTE.md)
+// ============================================================
+group('Régressions (bugs du 2026-07-27)');
+
+test('Mémoire du Cycle déplace la carte au lieu de la dupliquer (bug deck bloat)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], {
+    mana: 12, actionsLeft: 2,
+    relics: [{ id:'relic_memoire_cycle', flags:{ memoireCycle:true } }],
+  });
+  // 1er assemblage : arme lastElementPlayed, rien à rappeler encore.
+  playCombo(
+    { id:'m1', type:'element', cost:2, elem:'feu' },
+    { id:'p1', type:'forme', cost:1, forme:'proj' }
+  );
+  // 2e assemblage : doit rappeler m1 depuis la défausse, pas le cloner.
+  playCombo(
+    { id:'m2', type:'element', cost:2, elem:'glace' },
+    { id:'p2', type:'forme', cost:1, forme:'proj' }
+  );
+  const everywhere = [...G.combat.hand, ...G.combat.discard, ...G.combat.deck];
+  const occurrences = everywhere.filter(c => c.id === 'm1').length;
+  assertEqual(occurrences, 1, 'm1 doit exister UNE seule fois au total (hand+discard+deck)');
+  const recalled = G.combat.hand.find(c => c.id === 'm1');
+  assertTrue(!!recalled, 'm1 rappelée en main');
+  assertEqual(recalled.cost, 1, 'coût réduit de 1');
+});
+
+test('canAssemble() reflète la vraie friction Écho (+2 mana, Zone exclue)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }], {
+    mana: 4, actionsLeft: 2,
+    identity: { elem:'meta', flags:{ echoMode:true } },
+    echoUsedThisTurn: false,
+  });
+  G.combat.hand = [
+    { id:'e7', type:'element', cost:2, elem:'feu' },
+    { id:'f7', type:'forme', cost:1, forme:'proj' },
+  ];
+  G.selected = ['e7', 'f7'];
+  // Coût réel : 2+1+2(friction Écho) = 5 > 4 mana dispo → doit refuser.
+  assertEqual(canAssemble(), false, 'refuse un coup à 5 mana réel avec seulement 4 dispo');
+
+  G.mana = 5;
+  assertEqual(canAssemble(), true, 'accepte avec assez de mana pour couvrir la friction');
+
+  // Zone exempte de la friction Écho — même à mana serré, ça doit passer.
+  G.mana = 5;
+  G.combat.hand = [
+    { id:'e8', type:'element', cost:2, elem:'feu' },
+    { id:'f8', type:'forme', cost:3, forme:'zone' },
+  ];
+  G.selected = ['e8', 'f8'];
+  assertEqual(canAssemble(), true, 'Zone exclue de la friction Écho (coût réel 5, pas 7)');
+});
+
+test('appliedStates s\'efface quand un état retombe naturellement à 0', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'brule', 1);
+  assertIncludes(t.appliedStates, 'brule', 'brule marquée juste après application');
+  endTurn(); // tick ramène brule à 0
+  assertEqual(t.brule, 0, 'brule retombée à 0');
+  assertNotIncludes(t.appliedStates, 'brule', 'appliedStates nettoyé (sinon Sceau Résonant se déclenche à tort)');
+});
+
+// Raccourci : la vraie relique du pool, pour tester le comportement réel.
+const SCEAU = RELIC_POOL.find(r => r.id === 'relic_sceau_resonant');
+const IDENT_FEU = { elem:'feu', flags:{} };
+
+test('appliedStates est démarqué quand un combo CONSOMME l\'état (Détonation)', () => {
+  makeCombat([{ name:'A', maxHp:30, hp:30, atk:0 }]);
+  const a = G.combat.enemies[0];
+  applyStateToEnemy(a, 'brule', 3);
+  applyElementEffect({ elem:'vide', cost:2 }, a); // Détonation → brule = 0
+  assertEqual(a.brule, 0, 'brule consommée');
+  assertNotIncludes(a.appliedStates, 'brule', 'brule démarquée dès la fin de la résolution');
+});
+
+test('appliedStates est démarqué quand Choc Thermique consomme le Givré', () => {
+  makeCombat([{ name:'B', maxHp:30, hp:30, atk:0 }]);
+  const b = G.combat.enemies[0];
+  applyStateToEnemy(b, 'givre', 2);
+  applyElementEffect({ elem:'feu', cost:2 }, b);
+  assertEqual(b.givre, 0, 'givre consommé');
+  assertNotIncludes(b.appliedStates, 'givre', 'givre démarqué');
+});
+
+test('appliedStates est démarqué quand Fracture consomme le Fragile', () => {
+  makeCombat([{ name:'C', maxHp:30, hp:30, atk:0 }]);
+  const c = G.combat.enemies[0];
+  applyStateToEnemy(c, 'fragile', 1);
+  applyElementEffect({ elem:'glace', cost:2 }, c);
+  assertEqual(c.fragile, 0, 'fragile consommé');
+  assertNotIncludes(c.appliedStates, 'fragile', 'fragile démarqué');
+});
+
+test('GARDE-FOU : Sceau Résonant se déclenche TOUJOURS sur le combo qui consomme l\'état', () => {
+  // Si le démarquage arrivait trop tôt, la relique ne propagerait plus JAMAIS
+  // pour les Identités élémentaires. C'est le risque de sur-correction du fix.
+  makeCombat([
+    { name:'Cible',  maxHp:30, hp:30, atk:0 },
+    { name:'Voisin', maxHp:30, hp:30, atk:0 },
+  ], { identity: IDENT_FEU, relics: [SCEAU] });
+  const [cible, voisin] = G.combat.enemies;
+  applyStateToEnemy(cible, 'brule', 3);
+  applyElementEffect({ elem:'vide', cost:2 }, cible); // Détonation = 8 dgt
+  assertEqual(cible.hp, 22, 'cible : 8 dgt de détonation');
+  assertEqual(voisin.hp, 26, 'voisin : 4 dgt propagés (50% de 8) — la relique a bien vu l\'état');
+});
+
+test('Sceau Résonant ne propage PLUS sur un combo ultérieur si l\'état a disparu', () => {
+  // C'était le bug : l'état restait marqué à vie → propagation permanente.
+  makeCombat([
+    { name:'Cible',  maxHp:30, hp:30, atk:0 },
+    { name:'Voisin', maxHp:30, hp:30, atk:0 },
+  ], { identity: IDENT_FEU, relics: [SCEAU] });
+  const [cible, voisin] = G.combat.enemies;
+  applyStateToEnemy(cible, 'brule', 3);
+  applyElementEffect({ elem:'vide', cost:2 }, cible); // 1er combo : propage (légitime)
+  const hpVoisinApres1er = voisin.hp;
+
+  // 2e combo sur une cible SANS Brûlure : Fracture, aucun état Feu présent.
+  applyStateToEnemy(cible, 'fragile', 1);
+  applyElementEffect({ elem:'glace', cost:2 }, cible);
+  assertEqual(voisin.hp, hpVoisinApres1er, 'aucune propagation : la cible n\'était plus en Brûlure');
+});
+
+test('applyElementEffect ne résout rien sur une cible déjà morte', () => {
+  makeCombat([{ name:'Mort', maxHp:5, hp:0, atk:0 }]);
+  const d = G.combat.enemies[0];
+  const logsAvant = G.log.length;
+  const dmg = applyElementEffect({ elem:'feu', cost:2 }, d);
+  assertEqual(dmg, 0, 'aucun dégât renvoyé');
+  assertEqual(d.brule, 0, 'aucun état posé sur le cadavre');
+  assertEqual(G.log.length, logsAvant, 'aucun log mensonger ajouté');
+});
+
+test('Cœur de Forge : une cible tuée par le bonus Zone ne subit pas l\'Élément ensuite', () => {
+  makeCombat([
+    { name:'Fragile', maxHp:3, hp:3, atk:0 },
+    { name:'Solide',  maxHp:30, hp:30, atk:0 },
+  ], {
+    mana: 12, actionsLeft: 2,
+    relics: [{ id:'relic_forge', flags:{ zoneBonus:true } }],
+  });
+  const [fragile] = G.combat.enemies;
+  // Bonus Forge = 1 + 2 vivants = 3 dgt par cible → tue Fragile avant l'Élément.
+  playCombo(
+    { id:'ef', type:'element', cost:2, elem:'feu' },
+    { id:'ff', type:'forme', cost:3, forme:'zone' }
+  );
+  assertEqual(fragile.hp, 0, 'tuée par le bonus Forge');
+  assertEqual(fragile.brule, 0, 'aucune Brûlure posée sur le cadavre');
+});
+
+group('Rencontres aléatoires (buildCombatList)');
+
+test('buildCombatList couvre chaque rencontre exactement une fois', () => {
+  const list = buildCombatList();
+  assertEqual(list.length, ENCOUNTERS.length, 'une entrée par rencontre du pool');
+  assertEqual(new Set(list).size, list.length, 'aucun doublon');
+});
+
+test('Le palier "boss" est TOUJOURS en dernière position', () => {
+  for (let i = 0; i < 20; i++) {
+    const list = buildCombatList();
+    const last = ENCOUNTERS[list[list.length - 1]];
+    assertEqual(last.tier, 'boss', `essai ${i} : dernière rencontre = ${last.name} (tier ${last.tier})`);
+  }
+});
+
+test('Les 2 premières positions appartiennent toujours au palier "ouverture"', () => {
+  for (let i = 0; i < 20; i++) {
+    const list = buildCombatList();
+    const first2 = list.slice(0, 2).map(idx => ENCOUNTERS[idx].tier);
+    assertTrue(first2.every(t => t === 'ouverture'), `essai ${i} : tiers observés = ${first2}`);
+  }
+});
+
+test('L\'ordre à l\'intérieur d\'un palier varie réellement (pas un mélange cosmétique)', () => {
+  // Sur 30 tirages, La Goule (palier ouverture) doit apparaître en position 0
+  // ET en position 1 au moins une fois chacune — sinon le "mélange" ne mélange rien.
+  const gouleIdx = ENCOUNTERS.findIndex(e => e.name === 'La Goule');
+  const positions = new Set();
+  for (let i = 0; i < 30; i++) {
+    positions.add(buildCombatList().indexOf(gouleIdx));
+  }
+  assertTrue(positions.has(0) && positions.has(1), `positions observées pour La Goule : ${[...positions]}`);
+});
+
+test('L\'ordinal affiché (G.encName) reflète la position réelle, pas un nom figé', () => {
+  initRun();
+  pickStarterDeck(0);
+  assertEqual(G.encName, `Combat 1 — ${ENCOUNTERS[G.run.combatList[0]].name}`, 'ordinal 1 sur le premier combat');
+});
+
+test('Pipeline complet initRun → pickStarterDeck → initCombat n\'explose pas (régression switch/break)', () => {
+  initRun();
+  assertEqual(G.scene, 'deckChoice', 'scène deckChoice après initRun');
+  pickStarterDeck(0); // Arsenal
+  assertEqual(G.scene, 'combat', 'scène combat après pickStarterDeck');
+  assertTrue(G.combat.enemies.length > 0, 'ennemis générés');
+  assertEqual(G.combat.hand.length, 4, 'main de 4 cartes piochée');
+});
+
+
+// ============================================================
+// ARCHITECTURE — la promesse data-driven est-elle tenue ?
+// ============================================================
+group('Architecture data-driven');
+
+test('Ajouter un élément = ajouter une clé dans ELEMENT_RESOLVERS (zéro ligne moteur)', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  // Élément inédit, déclaré uniquement en data et à la volée.
+  ELEMENT_RESOLVERS.foudre = (el, target) => {
+    applyStateToEnemy(target, 'fragile', 2);
+    return 7;
+  };
+  try {
+    const dmg = applyElementEffect({ elem:'foudre', cost:2 }, t);
+    assertEqual(dmg, 7, 'dégâts renvoyés par le nouveau resolver');
+    assertEqual(t.hp, 13, 'dégâts appliqués par le moteur, sans le connaître');
+    assertEqual(t.fragile, 2, 'état posé par le resolver');
+  } finally {
+    delete ELEMENT_RESOLVERS.foudre;   // ne pas polluer les tests suivants
+  }
+});
+
+test('Élément inconnu (typo sur elem) : avertissement, aucun crash', () => {
+  makeCombat([{ name:'T', maxHp:20, hp:20, atk:0 }]);
+  const t = G.combat.enemies[0];
+  const dmg = applyElementEffect({ elem:'inexistant', name:'Truc', cost:2 }, t);
+  assertEqual(dmg, 0, 'aucun dégât');
+  assertEqual(t.hp, 20, 'cible intacte');
+  assertEqual(G.log[0].type, 'warn', 'avertissement loggué au joueur');
+});
+
+test('canAssemble() et assembleAction() ne peuvent plus diverger (coût à source unique)', () => {
+  // Balayage de tous les manas plausibles sous Écho (le cas qui a produit le
+  // bug de désync). Invariant : le bouton n'est actif QUE si le coup passe.
+  for(let mana = 0; mana <= 8; mana++) {
+    makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }], {
+      mana, actionsLeft: 2,
+      identity: { elem:'meta', flags:{ echoMode:true } },
+    });
+    const el = { id:'x', type:'element', cost:2, elem:'feu' };
+    const fo = { id:'y', type:'forme', cost:1, forme:'proj' };
+    G.combat.hand = [el, fo];
+    G.selected = [el.id, fo.id];
+
+    const boutonActif = canAssemble();
+    const manaAvant   = G.mana;
+    assembleAction();
+    const coupJoue    = G.mana < manaAvant;
+    assertEqual(coupJoue, boutonActif, `mana=${mana} : bouton actif=${boutonActif} mais coup joué=${coupJoue}`);
+  }
+});
+
+test('BALANCE pilote réellement le jeu (modifier la valeur change le résultat)', () => {
+  const original = BALANCE.combos.detonationDmgPerStack;
+  try {
+    BALANCE.combos.detonationDmgPerStack = 5;   // au lieu de 2
+    makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+    const t = G.combat.enemies[0];
+    applyStateToEnemy(t, 'brule', 3);
+    applyElementEffect({ elem:'vide', cost:2 }, t);
+    assertEqual(t.hp, 23, 'hp (2 base + 3x5 = 17 dgt) → la constante est bien la source');
+  } finally {
+    BALANCE.combos.detonationDmgPerStack = original;
+  }
+});
+
+// ============================================================
+// RENDU DES RÉSULTATS
+// ============================================================
+const passCount = results.filter(r => r.ok).length;
+const failCount = results.length - passCount;
+
+let html = `<div class="summary ${failCount === 0 ? 'all-pass' : 'has-fail'}">
+  ${passCount}/${results.length} tests passés${failCount > 0 ? ` — ${failCount} échec(s)` : ''}
+</div>`;
+
+let lastGroup = null;
+results.forEach(r => {
+  if (r.group !== lastGroup) {
+    html += `<div class="group">${r.group}</div>`;
+    lastGroup = r.group;
+  }
+  html += `<div class="row ${r.ok ? 'pass' : 'fail'}">
+    ${r.ok ? '✓' : '✗'} ${r.name}
+    ${r.ok ? '' : `<span class="err">${r.err}</span>`}
+  </div>`;
+});
+
+document.getElementById('results').innerHTML = html;
+
+// Résumé console — pratique pour lecture automatisée.
+console.log(`TESTS: ${passCount}/${results.length} passed`);
+if (failCount > 0) {
+  console.log('FAILURES:', results.filter(r => !r.ok).map(r => `${r.name}: ${r.err}`));
+}
+</script>
+</body>
+</html>
