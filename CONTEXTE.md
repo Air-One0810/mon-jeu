@@ -292,8 +292,9 @@ avant de trancher leur équilibrage final.
 - 4 runs de validation (2 reliques manquantes + 2 post-patch) — nécessite du
   playtest humain, les tests automatisés ne remplacent pas cette étape
   (ils valident la mécanique, pas le fun/rythme, cf. gamefeel.md)
-- Design réel de Fournaise (Brasier) et Zéro Absolu (Permafrost) — actuellement
-  des STUBS qui recyclent Feu/Glace pour valider le flux uniquement
+- ✅ Design réel de Fournaise et Zéro Absolu — FAIT (cf. section dédiée plus bas).
+  Reste à valider en playtest humain : le Stun de Zéro Absolu en Zone, et la
+  courbe de puissance de Fournaise sur un combat long.
 
 ### Socle restant (identifié à l'audit, non fait)
 - **Rendu incrémental** : tant que `renderCombat` réécrit tout l'`innerHTML`, le
@@ -352,6 +353,77 @@ Comportements non évidents verrouillés par les tests :
 - `IDENT_ECHO.previewCost` (affichage) est verrouillé par égalité contre
   `resolveAssemblyCost` (coût réel facturé) — même forme de bug que la
   désynchronisation canAssemble/assembleAction déjà corrigée une fois.
+
+## Cartes signature réelles — FAIT (2026-07-28)
+Les stubs Fournaise / Zéro Absolu sont remplacés par de vraies mécaniques.
+
+### Le cadre de design (pourquoi ces cartes existent)
+Les decks thématiques sont privés de leur Identité native (`excludeIdentities`) :
+Brasier ne peut JAMAIS avoir Cendres Persistantes, Permafrost jamais Étreinte
+Permanente. **La signature EST cette maîtrise élémentaire native, rendue sous
+forme de carte au lieu d'Identité.** C'est aussi ce qui explique qu'Arsenal
+n'en ait pas : il a accès à tout, il n'a rien à compenser.
+
+Conséquence utile : Fournaise ne peut exister QUE dans une run Brasier, qui ne
+peut jamais avoir Cendres. Le combo dégénéré (`bruleDoubleTick` + Brûlure
+permanente) est **structurellement impossible**, pas seulement improbable.
+
+### 🔥 Fournaise (Brasier) — « le feu ne s'éteint plus »
+3 mana · epic · `bruleStacks: 4`, `lockBrule: true`
+> 3 dgt + 4 Brûlure. Sur cette cible, la Brûlure ne s'éteint plus et inflige
+> ses stacks en dégâts chaque tour.
+
+Brasier a les dégâts mais pas le contrôle, et sa Brûlure est un consommable
+(détonner = encaisser puis repartir de zéro). Fournaise la transforme en MOTEUR.
+La Brûlure ignorant le bouclier ennemi, c'est aussi sa réponse aux tanks.
+
+Marque `bruleLocked` posée **par ennemi** (déclarée dans `newEnemy`), pas par
+run. Posée uniquement si la cible survit. Elle **survit à une Détonation** : la
+cible reste marquée, donc toute Brûlure ré-appliquée ensuite est de nouveau
+permanente.
+
+### ❄️ Zéro Absolu (Permafrost) — « geler, puis briser »
+3 mana · epic · `shatterGivre: true`
+> Cible non Givrée : 2 dgt + Givré (3). Cible Givrée : brise le Givré —
+> 4 dgt par tour consumé + Stun.
+
+Permafrost contrôle mais ne conclut pas (Glace = 1-2 dgt). Deux modes → jamais
+une carte morte. Sort **avant** la branche Fracture dans le resolver `glace`
+(return anticipé) : Zéro Absolu ne doit jamais enchaîner sur une Fracture ni
+reposer du Givré derrière lui, sinon le combo bouclerait.
+
+### ⚠️ Découverte de mesure — la Brûlure est une DURÉE, pas une intensité
+Le premier calibrage de Fournaise était faux, et **seule la mesure l'a révélé** :
+`Brûlure N` = 1 dgt/tour pendant N tours (N dgt au total), pas N dgt/tour. Les
+stacks ne comptent comme intensité que pour la Détonation (`+2 dgt/stack`).
+« Brûlure permanente » ne valait donc qu'1 dgt/tour → **8 DE sur 5 tours**,
+plus faible qu'une commune. Corrigé : sous la marque Fournaise, le stack brûle
+à pleine intensité (dgt = stacks).
+
+### Équilibrage mesuré (après correctif)
+| Scénario | DE | Verdict |
+|---|---|---|
+| Fournaise, 5 tours | 23 | dans la bande epic (18-30) |
+| Fournaise + 2 Feu empilés, 5 tours | 35 (8 stacks) | dépasse — voulu, build aligné |
+| Fournaise vs Bastion | tue en 4 tours (contre 14 avant) | le mur devient franchissable |
+| Détonation immédiate | 10 | seuil de rentabilité du moteur : 3 tours |
+| Zéro Absolu setup→brise | 14 + Stun | bande basse ; le Stun n'est pas compté en DE |
+
+La tension moteur-vs-burst est donc réelle et chiffrée : 10 dgt tout de suite,
+ou 4/tour rentabilisés en 3 tours.
+
+### Molettes de playtest (dans `BALANCE.signatures`)
+- `fournaiseBruleStacks` (4) → puissance du moteur
+- `zeroAbsoluDmgPerGivreTurn` (4) → puissance du closer
+- ⚠️ **Le Stun de Zéro Absolu en Zone est le point le plus suspect** : il saute
+  un tour ennemi complet sur tout le groupe. À surveiller en run réelle.
+
+### Validation
+- **77 tests verts** (61 → 77 ; 15 tests de signature + 1 sur le scaling des stacks)
+- Fuzz 40 runs / 5004 coups, signatures jouées 198 fois : zéro crash, mapping
+  deck→signature correct, Arsenal n'en reçoit bien aucune
+- Aperçus d'assemblage ajoutés (brise du Givré, verrou Fournaise) + badge 🔒
+  sur la Brûlure permanente dans l'UI
 
 ### Étape 3 — Méta réelle (PROCHAINE SESSION MAJEURE)
 - 3.a : ✅ fait (3 decks de départ + pool d'Identités filtré)

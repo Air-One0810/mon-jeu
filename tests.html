@@ -722,6 +722,174 @@ test('Sceau Résonant + Écho propage sur N\'IMPORTE QUEL combo (bypass du check
   assertEqual(voisin.hp, 26, 'voisin : propagation malgré une Identité "meta" sans lien avec l\'état Brûlure');
 });
 
+// Vraies cartes du pool — on teste ce que le joueur reçoit, pas une maquette.
+const FOURNAISE   = getDeckSignature('brasier');
+const ZERO_ABSOLU = getDeckSignature('permafrost');
+
+group('Signature — Fournaise (Brasier)');
+
+test('Applique 4 Brûlure et verrouille la décroissance', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(FOURNAISE, t);
+  assertEqual(t.brule, 4, '4 stacks posés');
+  assertEqual(t.bruleLocked, true, 'cible marquée');
+  assertEqual(t.hp, 37, '3 dgt directs (Feu standard)');
+});
+
+test('La Brûlure ne décroît plus ET brûle à pleine intensité (dgt = stacks)', () => {
+  // Le point crucial : normalement les stacks sont une DURÉE (1 dgt/tour
+  // pendant N tours). Sous Fournaise, ils deviennent une INTENSITÉ permanente.
+  makeCombat([{ name:'T', maxHp:60, hp:60, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(FOURNAISE, t);
+  const hpApresCarte = t.hp;   // 57
+  endTurn(); endTurn(); endTurn();
+  assertEqual(t.brule, 4, 'stack intact après 3 tours');
+  assertEqual(t.hp, hpApresCarte - 12, '4 dgt/tour x 3 tours — pas 1 dgt/tour');
+});
+
+test('Empiler du Feu sur une cible marquée augmente les dgt/tour', () => {
+  // C'est ce qui fait de Fournaise un MOTEUR : chaque Feu suivant intensifie
+  // le brasier au lieu d'en rallonger la durée.
+  makeCombat([{ name:'T', maxHp:60, hp:60, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(FOURNAISE, t);                 // 4 stacks verrouillés
+  applyElementEffect({ elem:'feu', cost:2 }, t);    // +2 stacks → 6
+  assertEqual(t.brule, 6, '6 stacks au total');
+  const hpAvantTour = t.hp;
+  endTurn();
+  assertEqual(t.hp, hpAvantTour - 6, '6 dgt sur ce tour');
+});
+
+test('Contrôle : sans Fournaise, la Brûlure s\'épuise normalement', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'brule', 4);
+  endTurn(); endTurn(); endTurn();
+  assertEqual(t.brule, 1, 'stack consommé à raison d\'1/tour');
+  assertEqual(t.bruleLocked, false, 'aucune marque sans Fournaise');
+});
+
+test('Le tick de Brûlure ignore le bouclier ennemi (réponse de Brasier aux tanks)', () => {
+  makeCombat([{ name:'Tank', maxHp:40, hp:40, atk:0, startShield:20 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(FOURNAISE, t);
+  const hpApresCarte = t.hp;
+  const shieldApresCarte = t.enemyShield;
+  endTurn();
+  assertEqual(t.hp, hpApresCarte - 4, 'les 4 dgt/tour passent à travers le bouclier');
+  assertEqual(t.enemyShield, shieldApresCarte, 'bouclier intact — le tick ne le touche pas');
+});
+
+test('Aucune marque posée si la cible meurt du coup', () => {
+  makeCombat([{ name:'T', maxHp:3, hp:3, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(FOURNAISE, t);
+  assertEqual(t.hp, 0, 'tuée par les 3 dgt directs');
+  assertEqual(t.bruleLocked, false, 'pas de marque sur un cadavre');
+  assertEqual(t.brule, 0, 'pas de Brûlure sur un cadavre');
+});
+
+test('La Détonation vide bien le stack permanent (la tension moteur-vs-burst est réelle)', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(FOURNAISE, t);          // brule 4, verrouillée, hp 37
+  applyElementEffect({ elem:'vide', cost:2 }, t);  // 2 + 4x2 = 10 dgt
+  assertEqual(t.brule, 0, 'la Détonation consomme le stack, même permanent');
+  assertEqual(t.hp, 27, '10 dgt de détonation');
+});
+
+test('Après une Détonation, la marque persiste : la Brûlure ré-appliquée est de nouveau permanente', () => {
+  makeCombat([{ name:'T', maxHp:60, hp:60, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(FOURNAISE, t);
+  applyElementEffect({ elem:'vide', cost:2 }, t);   // vide le stack
+  assertEqual(t.bruleLocked, true, 'la cible reste marquée');
+  applyElementEffect({ elem:'feu', cost:2 }, t);    // Feu normal : +2 Brûlure
+  const hpAvantTours = t.hp;
+  endTurn(); endTurn();
+  assertEqual(t.brule, 2, 'la nouvelle Brûlure ne décroît pas non plus');
+  assertEqual(t.hp, hpAvantTours - 4, 'et brûle à pleine intensité : 2 dgt/tour x 2');
+});
+
+group('Signature — Zéro Absolu (Permafrost)');
+
+test('Mode setup sur cible saine : 2 dgt + Givré (3)', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(ZERO_ABSOLU, t);
+  assertEqual(t.hp, 38, '2 dgt de setup');
+  assertEqual(t.givre, 3, 'gel profond : 3 tours');
+  assertEqual(t.stun, false, 'aucun Stun en mode setup');
+});
+
+test('Mode brise sur cible Givrée : consomme tout le Givré, 4 dgt par tour + Stun', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 3);
+  applyElementEffect(ZERO_ABSOLU, t);
+  assertEqual(t.hp, 28, '3 tours x 4 = 12 dgt');
+  assertEqual(t.givre, 0, 'tout le Givré consommé');
+  assertEqual(t.stun, true, 'Stun appliqué');
+});
+
+test('Séquence complète setup → brise (le vrai closer de Permafrost)', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyElementEffect(ZERO_ABSOLU, t);   // setup : 2 dgt, Givré 3
+  applyElementEffect(ZERO_ABSOLU, t);   // brise : 12 dgt + Stun
+  assertEqual(t.hp, 26, '2 + 12 = 14 dgt au total sur 2 cartes');
+  assertEqual(t.stun, true, 'Stun');
+});
+
+test('Les dégâts du brise scalent avec la durée du Givré consumé', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 1);
+  applyElementEffect(ZERO_ABSOLU, t);
+  assertEqual(t.hp, 36, '1 tour de Givré = 4 dgt seulement');
+});
+
+test('Zéro Absolu ne déclenche JAMAIS la Fracture, même sur une cible Fragile', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  t.fragile = 2;
+  applyElementEffect(ZERO_ABSOLU, t);   // cible saine (pas de Givré) → mode setup
+  assertEqual(t.fragile, 2, 'le Fragile n\'est pas consommé par une Fracture');
+  assertEqual(t.givre, 3, 'mode setup appliqué normalement');
+});
+
+test('Le mode brise ne repose pas de Givré derrière lui', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 2);
+  applyElementEffect(ZERO_ABSOLU, t);
+  assertEqual(t.givre, 0, 'sort avant la pose de Givré standard — sinon le combo boucle à l\'infini');
+});
+
+test('Le brise déclenche bien la réaction Catalyst (c\'est un combo)', () => {
+  makeCombat([{ name:'T', maxHp:40, hp:40, atk:0, archetype:'catalyst' }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 2);
+  applyElementEffect(ZERO_ABSOLU, t);
+  assertEqual(t.atkBonus, 1, 'le Réacteur réagit au combo Zéro Absolu');
+});
+
+test('Zone + brise : tout le groupe gelé est brisé d\'un coup (win condition Permafrost)', () => {
+  makeCombat([
+    { name:'A', maxHp:40, hp:40, atk:0 },
+    { name:'B', maxHp:40, hp:40, atk:0 },
+    { name:'C', maxHp:40, hp:40, atk:0 },
+  ], { mana: 20, actionsLeft: 2 });
+  G.combat.enemies.forEach(e => applyStateToEnemy(e, 'givre', 2));
+  playCombo({ ...ZERO_ABSOLU, id:'za' }, { id:'fz', type:'forme', cost:3, forme:'zone' });
+  G.combat.enemies.forEach(e => {
+    assertEqual(e.hp, 32, `${e.name} : 8 dgt (2 tours x 4)`);
+    assertEqual(e.stun, true, `${e.name} stunné`);
+  });
+});
+
 group('Rencontres aléatoires (buildCombatList)');
 
 test('buildCombatList couvre chaque rencontre exactement une fois', () => {

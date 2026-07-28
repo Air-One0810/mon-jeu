@@ -81,6 +81,19 @@ const BALANCE = {
   identities: {
     echoManaFriction: 2,          // surcoût du 1er assemblage éligible du tour
   },
+  // ── Cartes signature (1 par deck thématique, livrée après Combat 1) ──
+  // Ce sont les win conditions : elles ont le droit de dépasser la doctrine DE.
+  // Molettes de playtest à surveiller en priorité :
+  //   fournaiseBruleStacks       → puissance du moteur Brûlure de Brasier
+  //   zeroAbsoluDmgPerGivreTurn  → puissance du closer de Permafrost
+  //   (le Stun de Zéro Absolu en Zone est le point le plus susceptible
+  //    d'être trop fort : il saute un tour ennemi complet sur tout le groupe)
+  signatures: {
+    fournaiseBruleStacks: 4,
+    zeroAbsoluGivreDuration: 3,   // mode setup (cible non Givrée)
+    zeroAbsoluSetupDmg: 2,        // dgt directs du mode setup
+    zeroAbsoluDmgPerGivreTurn: 4, // mode brise : dgt par tour de Givré consumé
+  },
   relics: {
     forgeBonusBase: 1,            // + 1 par ennemi vivant
     sceauSpreadRatio: 0.5,
@@ -514,23 +527,46 @@ const RELIC_POOL = [
 // ============================================================
 // SIGNATURES — pool séparé. Lien deck↔carte via deckId.
 // Livraison : récompense GARANTIE après Combat 1 (Mécanisme B).
-// ⚠️ STUBS : ces 2 cartes réutilisent des mécaniques existantes
-//    (Feu / Glace) pour valider le FLUX. Le design réel de Fournaise
-//    et Zéro Absolu (mécaniques inédites + équilibrage DE) = session 3.b.2.
 // Arsenal : AUCUNE entrée → son identité est l'absence de signature.
 // ============================================================
+// POURQUOI ces cartes existent (cadre de design) :
+// Les decks thématiques sont privés de leur Identité native — Brasier ne peut
+// jamais se voir proposer Cendres Persistantes, Permafrost jamais Étreinte
+// Permanente (cf. excludeIdentities dans STARTER_DECKS). La signature EST cette
+// maîtrise élémentaire native, rendue sous forme de carte au lieu d'Identité.
+// C'est aussi ce qui explique qu'Arsenal n'en ait pas : il a accès à tout, il
+// n'a rien à compenser.
+//
+// Conséquence importante : Fournaise ne peut exister QUE dans une run Brasier,
+// qui ne peut JAMAIS avoir Cendres Persistantes. Le combo dégénéré
+// (bruleDoubleTick + Brûlure permanente) est structurellement impossible, pas
+// seulement improbable — inutile de le garder à l'œil.
+//
+// Ce sont des win conditions : la doctrine DE (epic 18-30) est un plancher,
+// pas un plafond. Molettes d'équilibrage dans BALANCE.signatures.
 const SIGNATURE_POOL = [
+  // 🔥 Le feu ne s'éteint plus. Brasier a les dégâts mais pas le contrôle, et
+  // sa Brûlure est un consommable (détonner = encaisser puis repartir de zéro).
+  // Fournaise la transforme en MOTEUR, et crée la vraie décision du deck :
+  // laisser tourner le moteur, ou tout cramer d'un Vide pour un burst.
   {
     id:'sig_brasier', deckId:'brasier',
     type:'element', name:'Fournaise', cost:3,
-    effect:'[STUB] 4 dgt + Brûlure (3). Win condition Feu — à redesigner.',
-    elem:'feu', rarity:'epic', dmgOverride:4, bruleStacks:3,
+    effect:'3 dgt + 4 Brûlure. Sur cette cible, la Brûlure ne s\'éteint plus et inflige ses stacks en dégâts chaque tour.',
+    elem:'feu', rarity:'epic',
+    bruleStacks: BALANCE.signatures.fournaiseBruleStacks,
+    lockBrule: true,
   },
+  // ❄️ Geler, puis briser. Permafrost contrôle mais ne conclut pas.
+  // Deux modes → jamais une carte morte : soit ton setup, soit ton payoff.
+  // Explose avec les 2 Zone du deck (geler tout le groupe, tout briser d'un coup).
   {
     id:'sig_permafrost', deckId:'permafrost',
     type:'element', name:'Zéro Absolu', cost:3,
-    effect:'[STUB] 2 dgt + Givré (2) + Fragile (2). Closer Glace — à redesigner.',
-    elem:'glace', rarity:'epic', givreDuration:2, applyFragile:true, fragileDuration:2,
+    effect:'Cible non Givrée : 2 dgt + Givré (3). Cible Givrée : brise le Givré — 4 dgt par tour consumé + Stun.',
+    elem:'glace', rarity:'epic',
+    shatterGivre: true,
+    givreDuration: BALANCE.signatures.zeroAbsoluGivreDuration,
   },
 ];
 
@@ -741,6 +777,11 @@ function newEnemy(e) {
     intent: null,
     appliedStates: [],
     atkBonus: 0,
+    // Fournaise (signature Brasier) : marque définitive posée sur CET ennemi.
+    // Tant qu'elle est vraie, sa Brûlure ne décroît plus (cf. endTurn).
+    // Survit à une Détonation qui remet brule à 0 : la cible reste marquée,
+    // donc toute Brûlure ré-appliquée ensuite est de nouveau permanente.
+    bruleLocked: false,
   };
 }
 
@@ -1150,6 +1191,16 @@ const ELEMENT_RESOLVERS = {
     if(survivesDamage(target, baseDmg)) {
       const stacks = el.bruleStacks ?? BALANCE.states.defaultBruleStacks;
       applyStateToEnemy(target, 'brule', stacks);
+      // ── FOURNAISE (signature Brasier) — change une RÈGLE, pas un chiffre ──
+      // Marque la cible : sa Brûlure cesse de décroître pour tout le combat.
+      // Le stack devient un moteur (dgt/tour indéfiniment) au lieu d'un
+      // consommable — et la Brûlure ignorant le bouclier ennemi, c'est la
+      // réponse de Brasier aux tanks (Bastion, Briseur).
+      // Posée seulement si la cible survit : pas de marque sur un cadavre.
+      if(el.lockBrule && !target.bruleLocked) {
+        target.bruleLocked = true;
+        addLog(`🔥🔒 FOURNAISE : la Brûlure de ${target.name} ne s'éteindra plus de ce combat.`, 'combo');
+      }
       if(!comboTriggered) addLog(`Feu → ${target.name} : ${baseDmg} dgt + ${stacks} Brûlure.`, 'good');
     } else if(!comboTriggered) {
       addLog(`Feu → ${target.name} : ${baseDmg} dgt (létal).`, 'good');
@@ -1158,6 +1209,37 @@ const ELEMENT_RESOLVERS = {
   },
 
   glace: (el, target, { comboBonus }) => {
+    // ── ZÉRO ABSOLU (signature Permafrost) — deux modes, jamais morte ──
+    // Permafrost sait geler et stunner mais ne sait pas CONCLURE : Glace fait
+    // 1-2 dgt. Cette carte convertit le contrôle accumulé en dégâts.
+    //   cible saine  → mode setup  : gèle profond (3 tours)
+    //   cible Givrée → mode brise  : consomme TOUT le Givré, N dgt par tour
+    // Sortie anticipée dans les deux cas : Zéro Absolu ne doit jamais
+    // enchaîner sur la Fracture ni sur la pose de Givré standard plus bas.
+    if(el.shatterGivre) {
+      if(target.givre > 0) {
+        const turns = target.givre;
+        let shatterDmg = turns * BALANCE.signatures.zeroAbsoluDmgPerGivreTurn;
+        if(comboBonus) shatterDmg += comboBonus;
+        target.givre = 0;
+        target.stun = true;
+        addLog(
+          `❄️💥 ZÉRO ABSOLU sur ${target.name} : ${turns} tour(s) de Givré brisés → ${shatterDmg} dgt + Stun${comboBonus ? ' (+'+comboBonus+' Cataclysme)' : ''}.`,
+          'combo'
+        );
+        triggerCatalystReaction(target, 'Zéro Absolu', shatterDmg);
+        return shatterDmg;
+      }
+      const setupDmg = BALANCE.signatures.zeroAbsoluSetupDmg;
+      if(survivesDamage(target, setupDmg)) {
+        applyStateToEnemy(target, 'givre', el.givreDuration ?? BALANCE.signatures.zeroAbsoluGivreDuration);
+        addLog(`❄️ Zéro Absolu → ${target.name} : ${setupDmg} dgt + Givré (${target.givre} tours). Rejoue-le pour briser.`, 'good');
+      } else {
+        addLog(`❄️ Zéro Absolu → ${target.name} : ${setupDmg} dgt (létal).`, 'good');
+      }
+      return setupDmg;
+    }
+
     let dmg = BALANCE.elementBaseDmg.glace;
     // Closer Permafrost : Glace frappe plus fort sur une cible déjà Givrée.
     // Rend le re-gel pertinent ; en Zone, chaque ennemi gelé encaisse le bonus.
@@ -1640,12 +1722,24 @@ function endTurn() {
   const bruleDoubleTick = G.run.identity?.flags?.bruleDoubleTick;
   G.combat.enemies.filter(e=>e.hp>0).forEach(e => {
     if(e.brule > 0) {
-      const tickDmg = bruleDoubleTick
+      const baseTick = bruleDoubleTick
         ? BALANCE.states.bruleTickDmgDoubled
         : BALANCE.states.bruleTickDmg;
+      // ── FOURNAISE ──
+      // Normalement, les stacks de Brûlure sont une DURÉE, pas une intensité :
+      // Brûlure 4 = 1 dgt/tour pendant 4 tours. Sous la marque Fournaise, le
+      // stack ne décroît plus ET brûle à pleine intensité (dgt = stacks).
+      // Sans cette seconde moitié, « Brûlure permanente » ne vaudrait qu'1
+      // dgt/tour : mesuré à 8 DE sur 5 tours, très loin de la bande epic 18-30.
+      const tickDmg = e.bruleLocked ? e.brule * baseTick : baseTick;
       e.hp = Math.max(0, e.hp - tickDmg);
-      e.brule -= 1;
-      addLog(`${e.name} subit ${tickDmg} dgt de Brûlure (${e.brule} restante).`, 'good');
+      if(!e.bruleLocked) e.brule -= 1;
+      addLog(
+        e.bruleLocked
+          ? `🔥🔒 ${e.name} subit ${tickDmg} dgt — la Fournaise ne s'éteint pas (${e.brule} Brûlure).`
+          : `${e.name} subit ${tickDmg} dgt de Brûlure (${e.brule} restante).`,
+        'good'
+      );
     }
     // Hors du `if` : un état déjà à 0 (consommé par un combo) doit AUSSI
     // être démarqué, sinon le nettoyage ne s'exécute jamais.
@@ -1899,10 +1993,16 @@ function assemblyDescription() {
         bonus += `<span class="assembly-bonus">⚡ Choc thermique sur ${tgt.name} (x2)</span> `;
       if (el.elem === 'vide'  && tgt.brule > 0 && !G.run.identity?.flags?.implosionMode)
         bonus += `<span class="assembly-bonus">⚡ Détonation sur ${tgt.name} (+${tgt.brule * 2} dgt)</span> `;
-      if (el.elem === 'glace' && tgt.fragile > 0)
+      // Fracture : masquée pour Zéro Absolu, qui sort avant cette branche.
+      if (el.elem === 'glace' && tgt.fragile > 0 && !el.shatterGivre)
         bonus += `<span class="assembly-bonus">⚡ Fracture sur ${tgt.name} (stun)</span> `;
       if (el.elem === 'vide'  && el.instantDetonate && tgt.brule > 0)
         bonus += `<span class="assembly-bonus">⚡ Onde amplifie : +${tgt.brule * 2} dgt bonus</span> `;
+      // ── Signatures ──
+      if (el.shatterGivre && tgt.givre > 0)
+        bonus += `<span class="assembly-bonus">❄️💥 Brise ${tgt.givre} Givré sur ${tgt.name} (${tgt.givre * BALANCE.signatures.zeroAbsoluDmgPerGivreTurn} dgt + Stun)</span> `;
+      if (el.lockBrule && !tgt.bruleLocked)
+        bonus += `<span class="assembly-bonus">🔥🔒 Brûlure permanente sur ${tgt.name}</span> `;
     });
 
     if (el.elem === 'cataclysme')

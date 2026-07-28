@@ -463,7 +463,7 @@ function renderCombat() {
     hpBarCache.pcts[i] = pct;
     let states = '';
     if(e.givre > 0)   states += `<span class="state-badge state-givre">❄ Givré ${e.givre}</span>`;
-    if(e.brule > 0)   states += `<span class="state-badge state-brule">🔥 Brûlure ${e.brule}</span>`;
+    if(e.brule > 0)   states += `<span class="state-badge state-brule">🔥 Brûlure ${e.brule}${e.bruleLocked ? ' 🔒' : ''}</span>`;
     if(e.fragile > 0) states += `<span class="state-badge state-frag">💎 Fragile ${e.fragile}</span>`;
     if(e.stun)        states += `<span class="state-badge state-stun">Stunné</span>`;
 
