@@ -525,6 +525,203 @@ test('Cœur de Forge : une cible tuée par le bonus Zone ne subit pas l\'Éléme
   assertEqual(fragile.brule, 0, 'aucune Brûlure posée sur le cadavre');
 });
 
+// Identités réelles du pool — pas des objets à la main : on veut aussi
+// exercer previewCost/previewElement, pas seulement les flags.
+const IDENT_ETREINTE  = IDENTITY_POOL.find(i => i.id === 'identity_etreinte');
+const IDENT_IMPLOSION = IDENTITY_POOL.find(i => i.id === 'identity_implosion');
+const IDENT_ECHO      = IDENTITY_POOL.find(i => i.id === 'identity_echo');
+
+group('Identité — Étreinte Permanente (glace)');
+
+test('noGivreDecay : le Givré ne décroît jamais sous Étreinte', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_ETREINTE });
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 2);
+  endTurn(); endTurn(); endTurn();
+  assertEqual(t.givre, 2, 'givre stable après 3 tours, alors qu\'il décroîtrait normalement');
+});
+
+test('Sans Étreinte, le Givré décroît normalement (contrôle)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }]);
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 2);
+  endTurn();
+  assertEqual(t.givre, 1, 'givre décrémenté d\'1 par tour sans Étreinte');
+});
+
+test('givreConsumeBackfire se déclenche si la cible SURVIT au Choc Thermique', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:5 }], { identity: IDENT_ETREINTE });
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 2);
+  applyElementEffect({ elem:'feu', cost:2 }, t);   // Choc Thermique : 6 dgt, 30-6=24 > 0 → survit
+  assertEqual(t.hp, 24, 'hp après Choc Thermique');
+  assertEqual(t.atkBonus, 1, 'backfire : +1 atk (punit la maladresse)');
+  // +1 du backfire, puis +2 de l'application normale de Brûlure post-Choc-Thermique (survit toujours) = 3
+  assertEqual(t.brule, 3, 'backfire (+1) puis Brûlure normale (+2) : 3 au total');
+});
+
+test('givreConsumeBackfire NE se déclenche PAS si le Choc Thermique tue la cible', () => {
+  makeCombat([{ name:'T', maxHp:5, hp:5, atk:0 }], { identity: IDENT_ETREINTE });
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 2);
+  applyElementEffect({ elem:'feu', cost:2 }, t);   // Choc Thermique : 6 dgt >= 5 hp → mort
+  assertEqual(t.hp, 0, 'tuée par le Choc Thermique');
+  assertEqual(t.atkBonus, 0, 'pas de backfire sur un kill réussi (c\'est le plan, pas la maladresse)');
+  assertEqual(t.brule, 0, 'aucune Brûlure sur un cadavre');
+});
+
+test('Le backfire ne se déclenche jamais sur Fracture (il est lié à la consommation de Givré, pas de Fragile)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_ETREINTE });
+  const t = G.combat.enemies[0];
+  t.fragile = 1;
+  applyElementEffect({ elem:'glace', cost:2 }, t);   // Fracture, pas Choc Thermique
+  assertEqual(t.atkBonus, 0, 'Fracture ne consomme pas de Givré → pas de backfire');
+});
+
+group('Identité — Implosion (vide)');
+
+test('Dégâts de base sans état présent : 2 (et pose quand même Fragile)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_IMPLOSION });
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'vide', cost:2 }, t);
+  assertEqual(t.hp, 28, '2 dgt (aucun état)');
+  assertEqual(t.fragile, 1, 'Implosion pose quand même Fragile — seuls les dgt directs changent');
+});
+
+test('Les dégâts scalent avec les états présents, la Brûlure comptant son nombre de stacks', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_IMPLOSION });
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'givre', 2);   // +1 au compteur d'état (présence)
+  applyStateToEnemy(t, 'brule', 3);   // +3 au compteur (scale sur les stacks, pas juste présence)
+  t.stun = true;                      // +1 au compteur (présence)
+  applyElementEffect({ elem:'vide', cost:2 }, t);
+  // 2 (base) + 1(givre) + 3(brule stacks) + 1(stun) = 7
+  assertEqual(t.hp, 23, '7 dgt au total');
+});
+
+test('Implosion NE consomme PAS la Brûlure (contrairement à la Détonation classique)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_IMPLOSION });
+  const t = G.combat.enemies[0];
+  applyStateToEnemy(t, 'brule', 3);
+  applyElementEffect({ elem:'vide', cost:2 }, t);
+  assertEqual(t.brule, 3, 'brule intacte — Implosion la lit, ne la consomme jamais');
+});
+
+test('Implosion ne fait PAS piocher (contrairement au Vide normal)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_IMPLOSION, mana:6, actionsLeft:2 });
+  playCombo(
+    { id:'ev', type:'element', cost:2, elem:'vide' },
+    { id:'fv', type:'forme', cost:1, forme:'proj' }
+  );
+  assertEqual(G.combat.hand.length, 0, 'aucune carte piochée : les 2 jouées sont parties, rien ne les remplace');
+});
+
+test('Sans Implosion, le Vide fait piocher normalement (contrôle)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], {
+    mana:6, actionsLeft:2, deck:[{ id:'d1', type:'element', cost:1, elem:'feu' }],
+  });
+  playCombo(
+    { id:'ev', type:'element', cost:2, elem:'vide' },
+    { id:'fv', type:'forme', cost:1, forme:'proj' }
+  );
+  assertEqual(G.combat.hand.length, 1, '1 carte piochée par le Vide normal');
+});
+
+test('Implosion n\'active jamais l\'archétype Catalyst (pas un combo classique)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0, archetype:'catalyst' }], { identity: IDENT_IMPLOSION });
+  const t = G.combat.enemies[0];
+  applyElementEffect({ elem:'vide', cost:2 }, t);
+  assertEqual(t.atkBonus, 0, 'Implosion ne déclenche pas triggerCatalystReaction');
+});
+
+group('Identité — Écho (meta)');
+
+test('Le 1er assemblage éligible du tour rejoue l\'effet en entier', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_ECHO, mana:10, actionsLeft:2 });
+  const t = G.combat.enemies[0];
+  playCombo(
+    { id:'ee', type:'element', cost:2, elem:'feu' },
+    { id:'fe', type:'forme', cost:1, forme:'proj' }
+  );
+  // 2 passages de Feu (3 dgt chacun, pas de Givré) : 30 - 3 - 3 = 24
+  assertEqual(t.hp, 24, '2 applications de Feu (écho)');
+  assertEqual(t.brule, 4, '2 x 2 stacks de Brûlure');
+  assertEqual(G.mana, 5, '10 - (2+1+2 friction Écho) = 5');
+  assertEqual(G.combat.echoUsedThisTurn, true, 'écho consommé pour ce tour');
+});
+
+test('Le 2e assemblage du même tour NE rejoue PAS (écho déjà consommé)', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_ECHO, mana:20, actionsLeft:2 });
+  const t = G.combat.enemies[0];
+  playCombo({ id:'e1', type:'element', cost:2, elem:'feu' }, { id:'f1', type:'forme', cost:1, forme:'proj' });
+  assertEqual(t.hp, 24, '1er assemblage : écho actif, 24 hp');
+  playCombo({ id:'e2', type:'element', cost:2, elem:'feu' }, { id:'f2', type:'forme', cost:1, forme:'proj' });
+  assertEqual(t.hp, 21, '2e assemblage : un seul passage (-3), pas de répétition');
+});
+
+test('Zone est exclue de la répétition Écho, même en 1er assemblage du tour', () => {
+  makeCombat([
+    { name:'A', maxHp:30, hp:30, atk:0 },
+    { name:'B', maxHp:30, hp:30, atk:0 },
+  ], { identity: IDENT_ECHO, mana:20, actionsLeft:2 });
+  const [a, b] = G.combat.enemies;
+  playCombo(
+    { id:'ez', type:'element', cost:2, elem:'feu' },
+    { id:'fz', type:'forme', cost:3, forme:'zone' }
+  );
+  assertEqual(a.hp, 27, 'un seul passage sur A (Zone exclue de l\'écho)');
+  assertEqual(b.hp, 27, 'un seul passage sur B');
+  assertEqual(G.combat.echoUsedThisTurn, false, 'Zone n\'active jamais l\'écho, même en 1er assemblage');
+  assertEqual(G.mana, 15, '20 - (2+3), aucune friction sur Zone');
+});
+
+test('echoUsedThisTurn se réinitialise au tour suivant', () => {
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_ECHO, mana:20, actionsLeft:2 });
+  playCombo({ id:'e1', type:'element', cost:2, elem:'feu' }, { id:'f1', type:'forme', cost:1, forme:'proj' });
+  assertEqual(G.combat.echoUsedThisTurn, true, 'consommé ce tour');
+  endTurn();
+  assertEqual(G.combat.echoUsedThisTurn, false, 'reset au tour suivant — le joueur peut ré-échoer');
+});
+
+test('previewCost de l\'Identité Écho reste synchronisé avec la friction réellement facturée', () => {
+  // Deux implémentations séparées de la même règle (une pour l'affichage, une
+  // pour le débit réel) ont déjà divergé une fois par le passé — cf. le bug
+  // canAssemble/assembleAction corrigé en 2026-07-27. Ce test verrouille
+  // l'affichage contre la même classe de bug.
+  makeCombat([{ name:'T', maxHp:30, hp:30, atk:0 }], { identity: IDENT_ECHO });
+  const el = { cost:2, elem:'feu' };
+  const projFo = { cost:1, forme:'proj' };
+  const zoneFo = { cost:3, forme:'zone' };
+  const ctx = { game: G };
+
+  assertEqual(
+    IDENT_ECHO.previewCost(el.cost + projFo.cost, el, projFo, ctx),
+    resolveAssemblyCost(el, projFo),
+    'preview Projectile == coût réel'
+  );
+  assertEqual(
+    IDENT_ECHO.previewCost(el.cost + zoneFo.cost, el, zoneFo, ctx),
+    resolveAssemblyCost(el, zoneFo),
+    'preview Zone == coût réel (aucune friction pour les deux)'
+  );
+});
+
+test('Sceau Résonant + Écho propage sur N\'IMPORTE QUEL combo (bypass du check d\'état)', () => {
+  // Pour une Identité élémentaire, Sceau exige que l'état corresponde
+  // (feu→brule, glace→givre, vide→fragile). Pour Écho (elem 'meta'), ce
+  // check est court-circuité : ça propage sur tout combo, sans lien avec
+  // l'élément de la carte jouée.
+  makeCombat([
+    { name:'Cible',  maxHp:30, hp:30, atk:0 },
+    { name:'Voisin', maxHp:30, hp:30, atk:0 },
+  ], { identity: IDENT_ECHO, relics: [SCEAU] });
+  const [cible, voisin] = G.combat.enemies;
+  applyStateToEnemy(cible, 'brule', 3);
+  applyElementEffect({ elem:'vide', cost:2 }, cible);   // Détonation = 8 dgt
+  assertEqual(cible.hp, 22, 'cible : 8 dgt de détonation');
+  assertEqual(voisin.hp, 26, 'voisin : propagation malgré une Identité "meta" sans lien avec l\'état Brûlure');
+});
+
 group('Rencontres aléatoires (buildCombatList)');
 
 test('buildCombatList couvre chaque rencontre exactement une fois', () => {
