@@ -296,9 +296,6 @@ avant de trancher leur équilibrage final.
   des STUBS qui recyclent Feu/Glace pour valider le flux uniquement
 
 ### Socle restant (identifié à l'audit, non fait)
-- **Tests sur reliques/identités** : les 7 bugs de la journée étaient TOUS dans
-  ces interactions, et c'est la zone la moins couverte. Sceau Résonant et Cœur de
-  Forge ont maintenant des tests ; Implosion, Écho et le backfire d'Étreinte non.
 - **Rendu incrémental** : tant que `renderCombat` réécrit tout l'`innerHTML`, le
   juice reste difficile (la barre de PV a nécessité un contournement rAF).
   Prérequis pour la doctrine gamefeel.md.
@@ -333,6 +330,28 @@ avant de trancher leur équilibrage final.
   ça se reproduit : des fonctions récemment ajoutées semblent « undefined »
   alors que le fichier sur disque est correct — vérifier le disque avant de
   chercher un bug côté code.
+
+## Couverture Identités — Implosion/Écho/Étreinte (2026-07-27, 4ᵉ partie)
+Dernière zone non couverte identifiée à l'audit (les 7 bugs de la session
+étaient tous dans les interactions Identité/Relique). **17 tests ajoutés
+(44 → 61), zéro bug trouvé cette fois** — les trois identités se comportent
+exactement comme leur implémentation le prévoit. Contrairement aux sessions
+précédentes, cet audit confirme plutôt qu'il ne corrige : information utile
+en soi, la zone est maintenant vérifiée et pas seulement « probablement correcte ».
+
+Comportements non évidents verrouillés par les tests :
+- Le backfire d'Étreinte s'ADDITIONNE à la Brûlure normale post-Choc-Thermique
+  (+1 backfire, puis +2 normal = **3** au total), pas seulement +1.
+- Implosion pose quand même Fragile (seule la FORMULE de dégâts change, pas
+  les effets secondaires du Vide).
+- Implosion lit le nombre de stacks de Brûlure dans son calcul de dégâts mais
+  ne la consomme JAMAIS (contrairement à une vraie Détonation).
+- Sceau Résonant + Écho propage sur N'IMPORTE QUEL combo : l'elem `'meta'`
+  de l'Identité court-circuite le check d'état que les identités élémentaires
+  doivent satisfaire.
+- `IDENT_ECHO.previewCost` (affichage) est verrouillé par égalité contre
+  `resolveAssemblyCost` (coût réel facturé) — même forme de bug que la
+  désynchronisation canAssemble/assembleAction déjà corrigée une fois.
 
 ### Étape 3 — Méta réelle (PROCHAINE SESSION MAJEURE)
 - 3.a : ✅ fait (3 decks de départ + pool d'Identités filtré)
